@@ -1,0 +1,149 @@
+@import "tailwindcss";
+
+/* ========== Design System — "Command Center" ========== */
+:root {
+  /* Background depth layers — lifted slightly for better contrast */
+  --bg-primary: #10111a;
+  --bg-secondary: #181924;
+  --bg-tertiary: #222332;
+  --bg-hover: #2a2b3d;
+  --bg-elevated: #252638;
+
+  /* Text hierarchy — brighter for readability */
+  --text-primary: #f4f4f8;
+  --text-secondary: #a8a8c0;
+  --text-muted: #6e6e8a;
+
+  /* Accent palette */
+  --accent-blue: #6396f5;
+  --accent-green: #3dd9a0;
+  --accent-amber: #f5c842;
+  --accent-red: #f07070;
+
+  /* Agent identity colors */
+  --agent-pm: #a78bfa;
+  --agent-pm-bg: rgba(167, 139, 250, 0.10);
+  --agent-pm-border: rgba(167, 139, 250, 0.22);
+  --agent-dev: #38bdf8;
+  --agent-dev-bg: rgba(56, 189, 248, 0.10);
+  --agent-dev-border: rgba(56, 189, 248, 0.22);
+  --agent-boss: #fbbf24;
+  --agent-boss-bg: rgba(251, 191, 36, 0.10);
+  --agent-boss-border: rgba(251, 191, 36, 0.22);
+
+  /* Borders — slightly more visible */
+  --border: #2a2b40;
+  --border-light: #383950;
+  --border-focus: rgba(99, 150, 245, 0.45);
+
+  /* System */
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-xs: 6px;
+  --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ========== Base ========== */
+body {
+  margin: 0;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', sans-serif;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ========== Animations ========== */
+
+/* Cursor blink for streaming text */
+.cursor-blink::after {
+  content: '▌';
+  animation: blink-cursor 0.7s step-end infinite;
+  color: var(--accent-blue);
+  font-weight: 300;
+  margin-left: 1px;
+}
+@keyframes blink-cursor {
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 0; }
+}
+
+/* Timeline node pulse */
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(99, 150, 245, 0.35); }
+  50% { box-shadow: 0 0 0 7px rgba(99, 150, 245, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(99, 150, 245, 0); }
+}
+
+/* General spin */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Avatar ring spin */
+@keyframes avatar-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Status dot blink */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+/* Entrance: fade + slide up */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in-up {
+  animation: fadeInUp 0.35s ease-out both;
+}
+
+/* Entrance: fade */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.animate-fade-in {
+  animation: fadeIn 0.35s ease-out both;
+}
+
+/* Connector flow animation for timeline */
+@keyframes connector-flow {
+  from { left: -100%; }
+  to { left: 100%; }
+}
+
+/* Gentle float for empty state icon */
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+/* ========== Scrollbar ========== */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* ========== Focus States ========== */
+input:focus {
+  border-color: var(--border-focus) !important;
+  box-shadow: 0 0 0 3px rgba(99, 150, 245, 0.1);
+}
+
+/* ========== Selection ========== */
+::selection {
+  background: rgba(99, 150, 245, 0.25);
+  color: var(--text-primary);
+}

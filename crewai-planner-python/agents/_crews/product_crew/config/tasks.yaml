@@ -1,0 +1,36 @@
+write_prd:
+  description: >
+    Write a concise PRD (Product Requirements Document) for {product_name}.
+
+    Here is a brief product description for context:
+    {product_brief}
+
+    The PRD should include:
+    - Product overview (2-3 sentences)
+    - Target users
+    - 3-5 core features with brief descriptions
+    - Success metrics (2-3 measurable KPIs)
+
+    Keep it focused and actionable. No fluff.
+    You MUST respond in {locale}.
+  expected_output: >
+    A structured PRD document in markdown format with clear sections
+    for overview, target users, core features, and success metrics.
+  agent: product_manager
+
+evaluate_requirements:
+  description: >
+    Review the PRD written by the Product Manager for {product_name}.
+
+    Your evaluation should:
+    - Rate overall clarity (1-5)
+    - Identify 2-3 technical risks or concerns
+    - Raise 2-3 critical questions the PM must address
+    - Give a preliminary feasibility assessment (Easy / Medium / Hard)
+
+    Be constructive but direct. Don't sugarcoat issues.
+    You MUST respond in {locale}.
+  expected_output: >
+    A structured technical evaluation with clarity rating,
+    identified risks, critical questions, and feasibility assessment.
+  agent: tech_lead

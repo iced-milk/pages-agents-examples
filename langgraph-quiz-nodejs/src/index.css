@@ -1,0 +1,124 @@
+@import "tailwindcss";
+
+@theme {
+  --color-accent-50: #eff6ff;
+  --color-accent-100: #dbeafe;
+  --color-accent-200: #bfdbfe;
+  --color-accent-500: #3b82f6;
+  --color-accent-600: #2563eb;
+  --color-accent-700: #1d4ed8;
+
+  --animate-fade-in: fade-in 180ms ease-out;
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: #fafafa;
+  color: #09090b;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0ms !important;
+  }
+}
+
+/* Mermaid FlowChart overrides */
+
+.quiz-flow svg {
+  background: transparent;
+  display: block;
+  margin: 0 auto;
+}
+
+.quiz-flow svg .nodeLabel,
+.quiz-flow svg .nodeLabel p,
+.quiz-flow svg .node foreignObject span,
+.quiz-flow svg .node text,
+.quiz-flow svg .node tspan {
+  font-size: 12px;
+  font-weight: normal;
+  fill: currentColor;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, sans-serif;
+  line-height: 1.2;
+}
+
+.quiz-flow svg .flowchart-link,
+.quiz-flow svg .edge-thickness-normal,
+.quiz-flow svg path.flowchart-link {
+  stroke: #a1a1aa;
+  stroke-width: 1.5px;
+  fill: none;
+}
+.quiz-flow svg .marker,
+.quiz-flow svg marker path {
+  fill: #a1a1aa;
+  stroke: #a1a1aa;
+}
+.quiz-flow svg .edgeLabel,
+.quiz-flow svg .edgeLabel p {
+  background: #ffffff;
+  color: #71717a;
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+.quiz-flow svg g.node.is-active rect,
+.quiz-flow svg g.node.is-active polygon,
+.quiz-flow svg g.node.is-active path.basic,
+.quiz-flow svg g.node.is-active .label-container {
+  filter: drop-shadow(0 0 0 rgba(59, 130, 246, 0.6))
+    drop-shadow(0 0 6px rgba(59, 130, 246, 0.55));
+  animation: quiz-flow-pulse 2s ease-in-out infinite;
+}
+
+.quiz-flow svg g.node.is-active .label,
+.quiz-flow svg g.node.is-active .label text,
+.quiz-flow svg g.node.is-active .label tspan,
+.quiz-flow svg g.node.is-active .nodeLabel {
+  font-weight: 500;
+}
+
+.quiz-flow svg g.node.is-done {
+  opacity: 0.55;
+  transition: opacity 200ms ease;
+}
+.quiz-flow svg g.node.is-active {
+  opacity: 1;
+}
+
+@keyframes quiz-flow-pulse {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 0 rgba(59, 130, 246, 0.5))
+      drop-shadow(0 0 4px rgba(59, 130, 246, 0.4));
+  }
+  50% {
+    filter: drop-shadow(0 0 0 rgba(59, 130, 246, 0.7))
+      drop-shadow(0 0 8px rgba(59, 130, 246, 0.65));
+  }
+}

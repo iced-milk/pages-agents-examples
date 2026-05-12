@@ -1,0 +1,25 @@
+final_review:
+  description: >
+    You are reviewing a product proposal for {product_name}.
+
+    Below is the team's discussion — the PM's PRD and the Tech Lead's
+    evaluation:
+
+    ---
+    {collaboration_result}
+    ---
+
+    Provide your executive review:
+    - Overall assessment (2-3 sentences)
+    - Key strengths of the proposal
+    - Key concerns or gaps
+    - Final decision: GO / NO-GO / CONDITIONAL GO
+    - If conditional, list the conditions that must be met
+
+    Be decisive. The team is waiting for your call.
+    You MUST respond in {locale}.
+  expected_output: >
+    An executive review with overall assessment, strengths,
+    concerns, final decision (GO/NO-GO/CONDITIONAL GO),
+    and conditions if applicable.
+  agent: boss
