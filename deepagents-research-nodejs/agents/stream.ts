@@ -39,7 +39,7 @@ import {
   toolRetryMiddleware,
   toolCallLimitMiddleware,
 } from 'langchain';
-import { createDeepAgent, type SubAgent } from 'deepagents';
+import { createDeepAgent, CompositeBackend, StateBackend, StoreBackend, type SubAgent } from 'deepagents';
 import { AIMessageChunk, ToolMessage } from '@langchain/core/messages';
 import { DDGS, type SearchResult } from '@phukon/duckduckgo-search';
 import { z } from 'zod';
@@ -97,7 +97,7 @@ async function getModel(env: Env): Promise<Model> {
   return model;
 }
 
-function getAgent(modelInstance: Model): Agent {
+function getAgent(modelInstance: Model, checkpointer: any, store: any): Agent {
   if (!agent) {
     logger.log('Initializing research agent...');
 
@@ -176,6 +176,17 @@ function getAgent(modelInstance: Model): Agent {
       middleware: [
         modelRetryMiddleware({ maxRetries: 3 }),
       ],
+      checkpointer,
+      store,
+      backend: new CompositeBackend(
+        new StateBackend(),
+        {
+          '/memories/': new StoreBackend({
+            namespace: ['agent', 'memories'],
+          }),
+        },
+      ),
+      memory: ['/memories/AGENTS.md'],
     });
   } else {
     logger.log('Agent already initialized, reusing');
@@ -209,6 +220,7 @@ interface StreamEvent {
 async function* eventStream(
   agentInstance: Agent,
   message: string,
+  conversationId: string,
   signal?: AbortSignal,
 ): AsyncGenerator<string> {
   // ── id mapping ──
@@ -264,6 +276,7 @@ async function* eventStream(
     const stream = await agentInstance.stream(
       { messages: [{ role: 'user', content: message }] },
       {
+        configurable: { thread_id: conversationId },
         streamMode: ['updates', 'messages'],
         subgraphs: true,
         signal,
@@ -462,20 +475,20 @@ export async function onRequest(context: any) {
   const { request, env, conversation_id: conversationId, run_id: runId } = context;
   logger.log('conversationId:', conversationId, 'runId:', runId);
 
-  const { message } = request?.body ?? {};
-  logger.log('user message:', message);
-  if (!message) {
-    logger.error('Missing chat message');
-    return new Response('Missing chat message', { status: 400 });
-  }
+  const body = request?.body ?? {};
+  const action = body.action || 'chat';
 
   const signal = request?.signal as AbortSignal | undefined;
+
+  // Get memory adapters from context
+  const checkpointer = context.memory.langgraphCheckpointer;
+  const store = context.memory.langgraphStore;
 
   let agentInstance: Agent;
   try {
     const envVars = getEnv(env);
     const modelInstance = await getModel(envVars);
-    agentInstance = getAgent(modelInstance);
+    agentInstance = getAgent(modelInstance, checkpointer, store);
   } catch (e) {
     const msg = (e as Error).message;
     logger.error(msg);
@@ -485,11 +498,111 @@ export async function onRequest(context: any) {
     });
   }
 
+  // ── action: history — restore conversation from checkpointer ──
+  if (action === 'history') {
+    const threadId = body.conversationId;
+    logger.log('history request for threadId:', threadId);
+    if (!threadId) {
+      return new Response(JSON.stringify({ items: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json; charset=UTF-8' },
+      });
+    }
+    try {
+      const state = await agentInstance.graph.getState({
+        configurable: { thread_id: threadId },
+      });
+      const rawMessages = state?.values?.messages || [];
+
+      // Build an ordered items array preserving the original conversation flow.
+      // Each item has a type so the frontend can reconstruct messages + subagent groups.
+      type HistoryItem =
+        | { type: 'user'; content: string }
+        | { type: 'coordinator'; content: string }
+        | { type: 'subagentTask'; id: string; description: string; subagentType: string; content: string };
+
+      const items: HistoryItem[] = [];
+
+      // Map tool_call_id -> task info for matching ToolMessages later
+      const pendingTasks = new Map<string, { description: string; subagentType: string }>();
+
+      for (const m of rawMessages) {
+        const msgType = typeof m._getType === 'function' ? m._getType() : m.type;
+
+        if (msgType === 'human') {
+          const content = typeof m.content === 'string' ? m.content : '';
+          if (content) items.push({ type: 'user', content });
+          continue;
+        }
+
+        if (msgType === 'ai') {
+          let textContent = '';
+          if (typeof m.content === 'string') {
+            textContent = m.content;
+          } else if (Array.isArray(m.content)) {
+            textContent = m.content
+              .filter((p: any) => p.type === 'text')
+              .map((p: any) => p.text || '')
+              .join('');
+          }
+
+          for (const tc of (m.tool_calls || [])) {
+            if (tc.name === 'task' && tc.id) {
+              pendingTasks.set(tc.id, {
+                description: (tc.args?.description || '').slice(0, 500),
+                subagentType: tc.args?.subagent_type || 'researcher',
+              });
+            }
+          }
+
+          if (textContent) items.push({ type: 'coordinator', content: textContent });
+          continue;
+        }
+
+        if (msgType === 'tool') {
+          const toolCallId = m.tool_call_id || '';
+          if (m.name === 'task' && pendingTasks.has(toolCallId)) {
+            const taskInfo = pendingTasks.get(toolCallId)!;
+            items.push({
+              type: 'subagentTask',
+              id: toolCallId,
+              description: taskInfo.description,
+              subagentType: taskInfo.subagentType,
+              content: typeof m.content === 'string' ? m.content : '',
+            });
+            pendingTasks.delete(toolCallId);
+          }
+          continue;
+        }
+      }
+
+      logger.log('history: found', items.length, 'items');
+      return new Response(JSON.stringify({ items }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json; charset=UTF-8' },
+      });
+    } catch (e) {
+      logger.error('history error:', (e as Error).message);
+      return new Response(JSON.stringify({ items: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json; charset=UTF-8' },
+      });
+    }
+  }
+
+  // ── action: chat (default) — normal SSE streaming ──
+  const { message } = body;
+  logger.log('user message:', message);
+  if (!message) {
+    logger.error('Missing chat message');
+    return new Response('Missing chat message', { status: 400 });
+  }
+
   const encoder = new TextEncoder();
   const readableStream = new ReadableStream({
     async start(controller) {
       try {
-        for await (const chunk of eventStream(agentInstance, message, signal)) {
+        for await (const chunk of eventStream(agentInstance, message, conversationId, signal)) {
           if (signal?.aborted) break;
           controller.enqueue(encoder.encode(chunk));
         }

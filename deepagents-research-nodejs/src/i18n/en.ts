@@ -40,4 +40,8 @@ export const en: Translations = {
 
   you: "You",
   coordinator: "Lead Researcher",
+
+  recentConversations: "Recent Conversations",
+  loadingHistory: "Loading conversation...",
+  deleteConversation: "Delete",
 };

@@ -34,4 +34,8 @@ export interface Translations {
 
   you: string;
   coordinator: string;
+
+  recentConversations: string;
+  loadingHistory: string;
+  deleteConversation: string;
 }
