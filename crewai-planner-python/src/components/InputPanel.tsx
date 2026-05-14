@@ -1,12 +1,30 @@
 import { useState } from 'react';
-import { t } from '../i18n';
+import { t, getLang } from '../i18n';
+import type { HistoryItem } from '../hooks/useSSE';
 
 interface Props {
   onSubmit: (productName: string) => void;
   isRunning: boolean;
+  history: HistoryItem[];
+  onSelectHistory: (id: string) => void;
+  onRemoveHistory: (id: string) => void;
 }
 
-export function InputPanel({ onSubmit, isRunning }: Props) {
+function formatRelativeTime(timestamp: number): string {
+  const diff = Date.now() - timestamp;
+  const minutes = Math.floor(diff / 60000);
+  const hours = Math.floor(diff / 3600000);
+  const days = Math.floor(diff / 86400000);
+  const zh = getLang() === 'zh';
+
+  if (minutes < 1) return zh ? '刚刚' : 'just now';
+  if (minutes < 60) return zh ? `${minutes} 分钟前` : `${minutes}m ago`;
+  if (hours < 24) return zh ? `${hours} 小时前` : `${hours}h ago`;
+  if (days < 7) return zh ? `${days} 天前` : `${days}d ago`;
+  return new Date(timestamp).toLocaleDateString(zh ? 'zh-CN' : 'en-US');
+}
+
+export function InputPanel({ onSubmit, isRunning, history, onSelectHistory, onRemoveHistory }: Props) {
   const [value, setValue] = useState('');
 
   const examples = [t('example.1'), t('example.2'), t('example.3')];
@@ -148,6 +166,98 @@ export function InputPanel({ onSubmit, isRunning }: Props) {
           ))}
         </div>
       </div>
+
+      {/* ─── History ─── */}
+      {history.length > 0 && (
+        <div className="flex flex-col" style={{ gap: 8 }}>
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              color: 'var(--text-muted)',
+              textTransform: 'uppercase',
+              letterSpacing: '1.2px',
+            }}
+          >
+            {t('history.title')}
+          </span>
+          <div className="flex flex-col" style={{ gap: 4 }}>
+            {history.map((item) => (
+              <div
+                key={item.id}
+                className="flex items-center"
+                style={{
+                  padding: '6px 10px',
+                  borderRadius: 8,
+                  border: '1px solid var(--border-light)',
+                  background: 'var(--bg-tertiary)',
+                  transition: 'var(--transition-fast)',
+                  gap: 8,
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = 'var(--accent-blue)';
+                  const del = e.currentTarget.querySelector('[data-delete]') as HTMLElement;
+                  if (del) del.style.opacity = '1';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = 'var(--border-light)';
+                  const del = e.currentTarget.querySelector('[data-delete]') as HTMLElement;
+                  if (del) del.style.opacity = '0';
+                }}
+              >
+                <button
+                  onClick={() => onSelectHistory(item.id)}
+                  disabled={isRunning}
+                  className="cursor-pointer"
+                  style={{
+                    flex: 1,
+                    textAlign: 'left',
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    fontFamily: 'inherit',
+                    cursor: isRunning ? 'not-allowed' : 'pointer',
+                    opacity: isRunning ? 0.5 : 1,
+                  }}
+                >
+                  <div style={{ fontSize: 12, color: 'var(--text-primary)', lineHeight: 1.4 }}>
+                    {item.productName}
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                    {formatRelativeTime(item.timestamp)}
+                  </div>
+                </button>
+                <button
+                  data-delete
+                  onClick={(e) => { e.stopPropagation(); onRemoveHistory(item.id); }}
+                  className="cursor-pointer"
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: '2px 4px',
+                    fontSize: 11,
+                    color: 'var(--text-muted)',
+                    cursor: 'pointer',
+                    opacity: 0,
+                    transition: 'var(--transition-fast)',
+                    fontFamily: 'inherit',
+                    borderRadius: 4,
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.color = 'var(--accent-red)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.color = 'var(--text-muted)';
+                  }}
+                  title={t('history.delete')}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ─── Concepts (anchored to bottom) ─── */}
       <div

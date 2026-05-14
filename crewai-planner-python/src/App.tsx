@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
-import { useSSE } from './hooks/useSSE';
+import { useSSE, getHistory, removeHistory as removeHistoryItem } from './hooks/useSSE';
+import type { HistoryItem } from './hooks/useSSE';
 import { InputPanel } from './components/InputPanel';
 import { FlowTimeline } from './components/FlowTimeline';
 import { ChatMessage } from './components/ChatMessage';
@@ -37,7 +38,8 @@ type Action =
   | { type: 'CHUNK'; agent: string; content: string }
   | { type: 'AGENT_END'; agent: string }
   | { type: 'DONE' }
-  | { type: 'ERROR'; message: string };
+  | { type: 'ERROR'; message: string }
+  | { type: 'RESTORE'; messages: ChatItem[]; timeline: AgentTimelineNode[] };
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
@@ -115,6 +117,15 @@ function reducer(state: AppState, action: Action): AppState {
         ],
       };
 
+    case 'RESTORE':
+      return {
+        ...state,
+        flowStatus: 'completed',
+        messages: action.messages,
+        timeline: action.timeline,
+        totalStartTime: null,
+      };
+
     default:
       return state;
   }
@@ -123,8 +134,19 @@ function reducer(state: AppState, action: Action): AppState {
 // --- App ---
 export default function App() {
   const [state, dispatch] = useReducer(reducer, INITIAL_STATE);
-  const { events, start } = useSSE();
+  const { events, start, loadHistory } = useSSE();
   const processedRef = useRef(0);
+
+  // History state
+  const [history, setHistory] = useState<HistoryItem[]>(getHistory);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+
+  const refreshHistory = useCallback(() => setHistory(getHistory()), []);
+
+  const handleRemoveHistory = useCallback((id: string) => {
+    removeHistoryItem(id);
+    refreshHistory();
+  }, [refreshHistory]);
 
   // Force re-render on language change
   const [, setLangTick] = useState(0);
@@ -183,7 +205,52 @@ export default function App() {
     dispatch({ type: 'FLOW_START' });  // Immediately show loading state
     isNearBottomRef.current = true;
     start(productName, getLocaleName());
+    // Refresh history after starting (localStorage was updated in useSSE.start)
+    setTimeout(refreshHistory, 100);
   };
+
+  // Load a past planning result from context.memory
+  const handleSelectHistory = useCallback(async (id: string) => {
+    setIsLoadingHistory(true);
+    dispatch({ type: 'RESET' });
+    const messages = await loadHistory(id);
+    if (messages.length > 0) {
+      // Build UI state directly — no SSE replay, no 0s elapsed times
+      const restoredMessages: ChatItem[] = [];
+      const restoredTimeline: AgentTimelineNode[] = INITIAL_TIMELINE.map((n) => ({ ...n, status: 'pending' }));
+
+      for (const msg of messages) {
+        if (msg.role === 'user') continue;
+        const agent = (msg.metadata?.agent as string) || '';
+        if (!agent) continue;
+        restoredMessages.push({ type: 'divider', agent });
+        restoredMessages.push({
+          type: 'message',
+          agent,
+          status: 'completed',
+          content: msg.content,
+          startTime: 0,
+        });
+        const tl = restoredTimeline.find((n) => n.role === agent);
+        if (tl) tl.status = 'completed';
+      }
+      restoredMessages.push({ type: 'system', text: t('msg.done') });
+
+      dispatch({ type: 'RESTORE', messages: restoredMessages, timeline: restoredTimeline });
+    }
+    setIsLoadingHistory(false);
+  }, [loadHistory]);
+
+  // Auto-restore from URL ?id= on mount
+  const hasAutoLoaded = useRef(false);
+  useEffect(() => {
+    if (hasAutoLoaded.current) return;
+    hasAutoLoaded.current = true;
+    const urlId = new URLSearchParams(window.location.search).get('id');
+    if (urlId) {
+      handleSelectHistory(urlId);
+    }
+  }, [handleSelectHistory]);
 
   return (
     <div className="h-screen flex flex-col" style={{ background: 'var(--bg-primary)' }}>
@@ -277,6 +344,9 @@ export default function App() {
           <InputPanel
             onSubmit={handleSubmit}
             isRunning={state.flowStatus === 'running'}
+            history={history}
+            onSelectHistory={handleSelectHistory}
+            onRemoveHistory={handleRemoveHistory}
           />
         </aside>
 
@@ -301,7 +371,29 @@ export default function App() {
             onScroll={handleScroll}
             className="flex-1 overflow-y-auto"
           >
-            {state.flowStatus === 'idle' ? (
+            {isLoadingHistory ? (
+              /* Loading history */
+              <div
+                className="h-full flex flex-col items-center justify-center"
+                style={{ padding: '0 24px' }}
+              >
+                <span
+                  style={{
+                    width: 24,
+                    height: 24,
+                    borderRadius: '50%',
+                    border: '3px solid var(--border-light)',
+                    borderTopColor: 'var(--accent-blue)',
+                    animation: 'spin 0.8s linear infinite',
+                    display: 'inline-block',
+                    marginBottom: 12,
+                  }}
+                />
+                <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                  {t('history.loading')}
+                </span>
+              </div>
+            ) : state.flowStatus === 'idle' ? (
               /* Empty State — welcoming & visible */
               <div
                 className="h-full flex flex-col items-center justify-center"

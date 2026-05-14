@@ -89,11 +89,34 @@ class ProductPlanFlow(Flow[ProductPlanState]):
 # ─── EdgeOne Pages Handler ───
 
 async def handler(context):
-    """POST /stream — Start the product planning Flow and return SSE stream."""
-    logger.log("conversationId:", getattr(context, "conversation_id", None),
+    """POST /stream — Handle plan/history actions."""
+    conversation_id = getattr(context, "conversation_id", None)
+    logger.log("conversationId:", conversation_id,
                "runId:", getattr(context, "run_id", None))
 
     body = context.request.body or {}
+    action = body.get("action", "plan")
+
+    # ── action: history — restore messages from context.memory ──
+    if action == "history":
+        cid = body.get("conversationId")
+        logger.log("history request for conversationId:", cid)
+        if not cid:
+            return {"status_code": 200, "body": {"messages": []}}
+        try:
+            messages = await context.memory.get_messages(cid, limit=100, order="asc")
+            items = [{
+                "role": m.role,
+                "content": m.content,
+                "metadata": m.metadata,
+            } for m in messages]
+            logger.log("history: found", len(items), "messages")
+            return {"status_code": 200, "body": {"messages": items}}
+        except Exception as e:
+            logger.error("history error:", str(e))
+            return {"status_code": 200, "body": {"messages": []}}
+
+    # ── action: plan (default) — Start the product planning Flow ──
     product_name = body.get("product_name")
     locale = body.get("locale", "English")
     logger.log("product_name:", product_name, "locale:", locale)
@@ -110,9 +133,20 @@ async def handler(context):
         logger.error(msg)
         return {"status_code": 500, "body": {"error": msg}}
 
+    memory = context.memory
+    cid = conversation_id
+
     async def gen():
         streaming = None
+        current_content = ""
+
         try:
+            # Save user input to memory
+            try:
+                await memory.append_message(cid, "user", product_name)
+            except Exception as e:
+                logger.error("memory save user error:", str(e))
+
             flow = ProductPlanFlow()
             flow.state.product_name = product_name
             flow.state.locale = locale
@@ -131,6 +165,17 @@ async def handler(context):
 
                 # Detect agent switch
                 if agent_role and agent_role != prev_agent:
+                    # Save previous agent's content to memory
+                    if prev_agent and current_content:
+                        try:
+                            await memory.append_message(
+                                cid, "assistant", current_content,
+                                metadata={"agent": prev_agent},
+                            )
+                        except Exception as e:
+                            logger.error("memory save agent error:", str(e))
+                        current_content = ""
+
                     if prev_agent:
                         yield context.utils.sse({"type": "agent_end", "agent": prev_agent})
                     yield context.utils.sse({
@@ -142,6 +187,7 @@ async def handler(context):
 
                 # Handle different chunk types
                 if chunk.chunk_type == StreamChunkType.TEXT:
+                    current_content += chunk.content or ""
                     yield context.utils.sse({
                         "type": "chunk",
                         "agent": agent_role,
@@ -156,6 +202,16 @@ async def handler(context):
                         "tool_name": chunk.tool_call.tool_name,
                         "arguments": chunk.tool_call.arguments,
                     })
+
+            # Save last agent's content to memory
+            if prev_agent and current_content:
+                try:
+                    await memory.append_message(
+                        cid, "assistant", current_content,
+                        metadata={"agent": prev_agent},
+                    )
+                except Exception as e:
+                    logger.error("memory save agent error:", str(e))
 
             # Send final agent_end
             if prev_agent:

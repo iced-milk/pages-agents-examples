@@ -46,6 +46,11 @@ const messages: Record<Lang, Record<string, string>> = {
 
     // Locale name for LLM
     'locale.name': 'Chinese (简体中文)',
+
+    // History
+    'history.title': '历史记录',
+    'history.delete': '删除',
+    'history.loading': '加载中...',
   },
   en: {
     'app.title': '🚀 CrewAI Product Planner',
@@ -85,6 +90,11 @@ const messages: Record<Lang, Record<string, string>> = {
     'agent.boss': 'Boss',
 
     'locale.name': 'English',
+
+    // History
+    'history.title': 'History',
+    'history.delete': 'Delete',
+    'history.loading': 'Loading...',
   },
 };
 
