@@ -6,7 +6,9 @@ export function useQuizSSE(onEvent: (ev: QuizEvent) => void) {
   handlerRef.current = onEvent;
 
   const abortRef = useRef<AbortController | null>(null);
-  const conversationIdRef = useRef<string>(crypto.randomUUID());
+  const conversationIdRef = useRef<string>(
+    new URLSearchParams(window.location.search).get('id') || crypto.randomUUID()
+  );
 
   const run = useCallback(async (body: unknown) => {
     abortRef.current?.abort();
@@ -69,7 +71,10 @@ export function useQuizSSE(onEvent: (ev: QuizEvent) => void) {
   }, []);
 
   const start = useCallback(
-    (language: "zh" | "en") => run({ action: "start", language }),
+    (language: "zh" | "en") => {
+      window.history.replaceState(null, '', '?id=' + conversationIdRef.current);
+      run({ action: "start", language });
+    },
     [run]
   );
 
@@ -84,13 +89,33 @@ export function useQuizSSE(onEvent: (ev: QuizEvent) => void) {
 
   const resetConversation = useCallback(() => {
     conversationIdRef.current = crypto.randomUUID();
+    window.history.replaceState(null, '', window.location.pathname);
   }, []);
 
   const getConversationId = useCallback(() => {
     return conversationIdRef.current;
   }, []);
 
-  return { start, answer, cancel, resetConversation, getConversationId };
+  const resume = useCallback(async (): Promise<any> => {
+    const id = conversationIdRef.current;
+    if (!id || !new URLSearchParams(window.location.search).get('id')) return null;
+    try {
+      const resp = await fetch("/quiz", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "pages-agent-conversation-id": id,
+        },
+        body: JSON.stringify({ action: "resume" }),
+      });
+      if (!resp.ok) return null;
+      return await resp.json();
+    } catch {
+      return null;
+    }
+  }, []);
+
+  return { start, answer, cancel, resetConversation, getConversationId, resume };
 }
 
 function parseFrame(frame: string, emit: (ev: QuizEvent) => void) {

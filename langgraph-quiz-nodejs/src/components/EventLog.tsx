@@ -3,9 +3,6 @@ import { useTranslation } from "../i18n";
 
 export interface NodeLogEntry {
   node: string;
-  startedAt: number;
-  finishedAt: number;
-  slow: boolean;
 }
 
 interface Props {
@@ -44,7 +41,7 @@ export function EventLog({ entries, busy }: Props) {
           className="flex flex-col gap-0.5 text-xs max-h-56 overflow-y-auto pr-1"
         >
           {entries.map((entry, idx) => (
-            <LogRow key={`${entry.startedAt}-${idx}`} entry={entry} lang={lang} />
+            <LogRow key={`${entry.node}-${idx}`} entry={entry} lang={lang} />
           ))}
           {busy && (
             <li className="flex items-center gap-2 py-1.5 px-2 rounded-md text-accent-700 bg-accent-50">
@@ -78,26 +75,16 @@ const NODE_LABEL: Record<"zh" | "en", Record<string, string>> = {
 };
 
 function LogRow({ entry, lang }: { entry: NodeLogEntry; lang: "zh" | "en" }) {
-  const duration = entry.finishedAt - entry.startedAt;
   const label = NODE_LABEL[lang][entry.node];
 
   return (
     <li className="flex items-center gap-2 py-1 px-2 rounded-md hover:bg-zinc-50 transition-colors">
-      <span
-        className={
-          "shrink-0 text-xs " +
-          (entry.slow ? "text-accent-600" : "text-zinc-400")
-        }
-        aria-hidden
-      >
-        {entry.slow ? "→" : "·"}
+      <span className="shrink-0 text-xs text-zinc-400" aria-hidden>
+        ·
       </span>
       <span className="flex-1 truncate font-mono text-[11px] text-zinc-600">
         {entry.node}
         {label && <span className="text-zinc-400 ml-1.5">{label}</span>}
-      </span>
-      <span className="font-mono text-[10px] text-zinc-400 tabular-nums">
-        {formatMs(duration)}
       </span>
     </li>
   );
@@ -110,10 +97,4 @@ function Spinner() {
       aria-hidden
     />
   );
-}
-
-function formatMs(ms: number): string {
-  if (ms <= 0) return "<1ms";
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
 }

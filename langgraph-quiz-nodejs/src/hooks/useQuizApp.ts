@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { NodeLogEntry } from "../components/EventLog";
 import { useQuizSSE } from "./useQuizSSE";
 import type {
@@ -31,13 +31,13 @@ export interface QuizAppState {
   currentNode: NodeName | null;
   completedNodes: Set<string>;
   nodeLog: NodeLogEntry[];
-  roundStartTime: number;
 
   finalResult: CompleteEvent | null;
   errorMessage: string | null;
 
   isTransitioning: boolean;
   isStarted: boolean;
+  isResuming: boolean;
 }
 
 const INITIAL: QuizAppState = {
@@ -57,20 +57,12 @@ const INITIAL: QuizAppState = {
   currentNode: null,
   completedNodes: new Set(),
   nodeLog: [],
-  roundStartTime: 0,
   finalResult: null,
   errorMessage: null,
   isTransitioning: false,
   isStarted: false,
+  isResuming: !!new URLSearchParams(window.location.search).get('id'),
 };
-
-function isSlowNode(name: string | null): boolean {
-  return (
-    name === "generate_question" ||
-    name === "await_answer" ||
-    name === "give_hint"
-  );
-}
 
 export function useQuizApp() {
   const [s, setS] = useState<QuizAppState>(INITIAL);
@@ -96,7 +88,6 @@ export function useQuizApp() {
             finalResult: null,
             errorMessage: null,
             currentNode: "generate_question",
-            roundStartTime: Date.now(),
             isStarted: true,
           }));
           break;
@@ -107,14 +98,9 @@ export function useQuizApp() {
             const completed = new Set(prev.completedNodes);
             completed.add(node);
 
-            const finishedAt = Date.now();
-            const startedAt =
-              prev.nodeLog.length === 0
-                ? prev.roundStartTime || finishedAt
-                : prev.nodeLog[prev.nodeLog.length - 1].finishedAt;
             const nodeLog: NodeLogEntry[] = [
               ...prev.nodeLog,
-              { node, startedAt, finishedAt, slow: isSlowNode(node) },
+              { node },
             ];
 
             const partial: Partial<QuizAppState> = {
@@ -130,7 +116,6 @@ export function useQuizApp() {
                 partial.currentNode = "generate_question";
                 partial.isTransitioning = true;
                 partial.status = "thinking";
-                partial.roundStartTime = Date.now();
               }
             }
             return partial;
@@ -252,12 +237,77 @@ export function useQuizApp() {
     [patch]
   );
 
-  const { start: sseStart, answer: sseAnswer, resetConversation } =
+  const { start: sseStart, answer: sseAnswer, resetConversation, resume: sseResume } =
     useQuizSSE(handleEvent);
+
+  // Auto-resume from checkpointer on mount if URL has ?id=
+  const hasAutoResumed = useRef(false);
+  useEffect(() => {
+    if (hasAutoResumed.current) return;
+    hasAutoResumed.current = true;
+    sseResume().then((data) => {
+      if (!data || data.status === "no_session") {
+        patch(() => ({ isResuming: false }));
+        return;
+      }
+      const st = data.state;
+      if (data.status === "completed") {
+        const total = st.total_questions || 5;
+        const attempts = st.total_attempts || 0;
+        patch(() => ({
+          isResuming: false,
+          isStarted: true,
+          question: st.question,
+          options: st.options || [],
+          questionNumber: st.question_number || 0,
+          total,
+          score: st.score || 0,
+          maxAttempts: data.max_attempts || 2,
+          status: "done",
+          finalResult: {
+            final_score: st.score || 0,
+            total,
+            total_attempts: attempts,
+            avg_attempts: total ? Math.round((attempts / total) * 100) / 100 : 0,
+          },
+        }));
+      } else {
+        const hintGiven = st.hint_given ?? false;
+        // Infer completed nodes from current state
+        const completedList: string[] = ["generate_question"];
+        if (hintGiven) {
+          completedList.push("await_answer", "evaluate_answer", "give_hint");
+        }
+        const completed = new Set<string>(completedList);
+        // Build placeholder node log entries for completed nodes
+        const restoredLog: NodeLogEntry[] = completedList.map((node) => ({
+          node,
+        }));
+        patch(() => ({
+          isResuming: false,
+          isStarted: true,
+          question: st.question,
+          options: st.options || [],
+          questionNumber: st.question_number || 0,
+          total: st.total_questions || 5,
+          score: st.score || 0,
+          maxAttempts: data.max_attempts || 2,
+          currentAttempt: hintGiven ? 2 : 1,
+          hintText: st.last_feedback && hintGiven ? st.last_feedback : "",
+          status: "waiting",
+          currentNode: "await_answer",
+          completedNodes: completed,
+          nodeLog: restoredLog,
+        }));
+      }
+    }).catch(() => {
+      patch(() => ({ isResuming: false }));
+    });
+  }, [sseResume, patch]);
 
   const start = useCallback(
     (lang: "zh" | "en") => {
-      setS({ ...INITIAL });
+      setS({ ...INITIAL, isResuming: false });
       lastSelectedRef.current = null;
       resetConversation();
       sseStart(lang);

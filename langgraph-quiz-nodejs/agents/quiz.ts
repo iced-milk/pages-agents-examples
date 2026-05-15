@@ -1,10 +1,22 @@
 import { Command } from "@langchain/langgraph";
-import { graph } from "./_lib/graph";
+import { buildGraph } from "./_lib/graph";
 import { MAX_ATTEMPTS } from "./_lib/state";
 import { createLogger } from "./_lib/logger";
 import { initModels, type Env } from "./_lib/nodes";
 
 const logger = createLogger("quiz");
+
+// ─── Singleton graph (lazy init with platform checkpointer) ───
+
+let _graph: ReturnType<typeof buildGraph> | null = null;
+
+function getGraph(checkpointer: any, store: any): ReturnType<typeof buildGraph> {
+  if (!_graph) {
+    logger.log("Initializing graph with platform checkpointer and store...");
+    _graph = buildGraph(checkpointer, store);
+  }
+  return _graph;
+}
 
 function sse(event: string, data: unknown): string {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -24,6 +36,7 @@ function getEnv(contextEnv: Record<string, string | undefined> | undefined): Env
 }
 
 async function streamGraph(
+  graphInstance: ReturnType<typeof buildGraph>,
   payload: any,
   config: { configurable: { thread_id: string } },
   signal?: AbortSignal
@@ -32,7 +45,7 @@ async function streamGraph(
   const readableStream = new ReadableStream({
     async start(controller) {
       try {
-        const stream = await graph.stream(payload, {
+        const stream = await graphInstance.stream(payload, {
           ...config,
           streamMode: ["updates", "custom", "messages"],
         });
@@ -78,7 +91,7 @@ async function streamGraph(
         }
 
         // Check if graph reached END
-        const state = await graph.getState(config);
+        const state = await graphInstance.getState(config);
         if (!state.next || state.next.length === 0) {
           const finalValues = (state.values ?? {}) as Record<string, unknown>;
           const total = (finalValues.total_questions as number) || 0;
@@ -124,6 +137,7 @@ async function streamGraph(
 }
 
 async function handleStart(
+  graphInstance: ReturnType<typeof buildGraph>,
   conversationId: string,
   payload: any,
   signal?: AbortSignal
@@ -156,7 +170,7 @@ async function handleStart(
     max_attempts: MAX_ATTEMPTS,
   });
 
-  const graphResponse = await streamGraph(initial, config, signal);
+  const graphResponse = await streamGraph(graphInstance, initial, config, signal);
   const graphBody = graphResponse.body!;
 
   // Combine session event + graph stream
@@ -188,6 +202,7 @@ async function handleStart(
 }
 
 async function handleAnswer(
+  graphInstance: ReturnType<typeof buildGraph>,
   conversationId: string,
   payload: any,
   signal?: AbortSignal
@@ -212,7 +227,7 @@ async function handleAnswer(
 
   // Verify thread exists and is waiting
   try {
-    const state = await graph.getState(config);
+    const state = await graphInstance.getState(config);
     if (!state.next || state.next.length === 0) {
       return new Response(
         JSON.stringify({ detail: "thread already finished" }),
@@ -230,11 +245,57 @@ async function handleAnswer(
 
   logger.log("answer:", answerLetter, "conversationId:", conversationId);
 
-  return streamGraph(new Command({ resume: answerLetter }), config, signal);
+  return streamGraph(graphInstance, new Command({ resume: answerLetter }), config, signal);
 }
 
-async function handleGraph(): Promise<Response> {
-  const drawable = await graph.getGraphAsync();
+async function handleResume(
+  graphInstance: ReturnType<typeof buildGraph>,
+  conversationId: string,
+): Promise<Response> {
+  const config = { configurable: { thread_id: conversationId } };
+
+  try {
+    const state = await graphInstance.getState(config);
+    if (!state?.values || Object.keys(state.values).length === 0) {
+      return new Response(
+        JSON.stringify({ status: "no_session" }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    const v = state.values as Record<string, unknown>;
+    const isFinished = !state.next || state.next.length === 0;
+
+    return new Response(
+      JSON.stringify({
+        status: isFinished ? "completed" : "in_progress",
+        state: {
+          question: v.current_question || "",
+          options: v.options || [],
+          correct_option: v.correct_option || "",
+          question_number: v.question_number || 0,
+          total_questions: v.total_questions || 5,
+          score: v.score || 0,
+          total_attempts: v.total_attempts || 0,
+          is_first_attempt: v.is_first_attempt ?? true,
+          hint_given: v.hint_given ?? false,
+          last_feedback: v.last_feedback || "",
+          language: v.language || "zh",
+        },
+        max_attempts: MAX_ATTEMPTS,
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  } catch {
+    return new Response(
+      JSON.stringify({ status: "no_session" }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  }
+}
+
+async function handleGraph(graphInstance: ReturnType<typeof buildGraph>): Promise<Response> {
+  const drawable = await graphInstance.getGraphAsync();
   const mermaid = drawable.drawMermaid({ withStyles: false });
   return new Response(JSON.stringify({ mermaid }), {
     status: 200,
@@ -258,6 +319,10 @@ export async function onRequest(context: any) {
 
   const signal = request?.signal as AbortSignal | undefined;
 
+  // Get memory adapters from context
+  const checkpointer = context.memory.langgraphCheckpointer;
+  const store = context.memory.langgraphStore;
+
   try {
     initModels(getEnv(env));
   } catch (e) {
@@ -269,13 +334,17 @@ export async function onRequest(context: any) {
     });
   }
 
+  const graphInstance = getGraph(checkpointer, store);
+
   switch (action) {
     case "start":
-      return handleStart(conversationId, payload, signal);
+      return handleStart(graphInstance, conversationId, payload, signal);
     case "answer":
-      return handleAnswer(conversationId, payload, signal);
+      return handleAnswer(graphInstance, conversationId, payload, signal);
+    case "resume":
+      return handleResume(graphInstance, conversationId);
     case "graph":
-      return handleGraph();
+      return handleGraph(graphInstance);
     default:
       return new Response(
         JSON.stringify({ detail: `Unknown action: ${action}` }),

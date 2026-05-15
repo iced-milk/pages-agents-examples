@@ -1,4 +1,4 @@
-import { END, START, StateGraph, MemorySaver } from "@langchain/langgraph";
+import { END, START, StateGraph } from "@langchain/langgraph";
 
 import {
   awaitAnswer,
@@ -12,7 +12,7 @@ import {
 } from "./nodes";
 import { QuizState } from "./state";
 
-function buildGraph() {
+function buildGraph(checkpointer: any, store?: any) {
   const graph = new StateGraph(QuizState)
     .addNode("generate_question", generateQuestion)
     .addNode("await_answer", awaitAnswer)
@@ -34,7 +34,7 @@ function buildGraph() {
       __end__: END,
     });
 
-  return graph.compile({ checkpointer: new MemorySaver() });
+  return graph.compile({ checkpointer, store });
 }
 
-export const graph = buildGraph();
+export { buildGraph };
