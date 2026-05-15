@@ -320,8 +320,8 @@ export async function onRequest(context: any) {
   const signal = request?.signal as AbortSignal | undefined;
 
   // Get memory adapters from context
-  const checkpointer = context.memory.langgraphCheckpointer;
-  const store = context.memory.langgraphStore;
+  const checkpointer = context.store.langgraphCheckpointer;
+  const store = context.store.langgraphStore;
 
   try {
     initModels(getEnv(env));

@@ -209,7 +209,6 @@ export default function App() {
     setTimeout(refreshHistory, 100);
   };
 
-  // Load a past planning result from context.memory
   const handleSelectHistory = useCallback(async (id: string) => {
     setIsLoadingHistory(true);
     dispatch({ type: 'RESET' });

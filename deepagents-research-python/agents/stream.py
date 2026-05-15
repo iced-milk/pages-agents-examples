@@ -427,8 +427,8 @@ async def handler(context):
     action = body.get("action", "chat")
 
     # Get memory adapters from context
-    checkpointer = context.memory.langgraph_checkpointer
-    store = context.memory.langgraph_store
+    checkpointer = context.store.langgraph_checkpointer
+    store = context.store.langgraph_store
 
     try:
         env = _get_env(context.env)

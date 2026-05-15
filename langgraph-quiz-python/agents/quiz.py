@@ -243,8 +243,8 @@ async def handler(context):
         return {"status_code": 500, "body": {"error": msg}}
 
     # Get memory adapters from context
-    checkpointer = context.memory.langgraph_checkpointer
-    store = context.memory.langgraph_store
+    checkpointer = context.store.langgraph_checkpointer
+    store = context.store.langgraph_store
     graph_instance = _get_graph(checkpointer, store)
 
     match action:

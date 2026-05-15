@@ -97,14 +97,14 @@ async def handler(context):
     body = context.request.body or {}
     action = body.get("action", "plan")
 
-    # ── action: history — restore messages from context.memory ──
+    # ── action: history — restore messages from context.store ──
     if action == "history":
         cid = body.get("conversationId")
         logger.log("history request for conversationId:", cid)
         if not cid:
             return {"status_code": 200, "body": {"messages": []}}
         try:
-            messages = await context.memory.get_messages(cid, limit=100, order="asc")
+            messages = await context.store.get_messages(cid, limit=100, order="asc")
             items = [{
                 "role": m.role,
                 "content": m.content,
@@ -133,7 +133,7 @@ async def handler(context):
         logger.error(msg)
         return {"status_code": 500, "body": {"error": msg}}
 
-    memory = context.memory
+    memory = context.store
     cid = conversation_id
 
     async def gen():

@@ -119,7 +119,6 @@ export function useSSE() {
     }
   }, []);
 
-  // Load history from backend (context.memory)
   // Returns raw memory messages: { role, content, metadata }
   const loadHistory = useCallback(async (targetId: string): Promise<Array<{ role: string; content: string; metadata?: Record<string, unknown> | null }>> => {
     conversationIdRef.current = targetId;
