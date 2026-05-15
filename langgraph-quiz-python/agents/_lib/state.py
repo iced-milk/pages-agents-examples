@@ -20,4 +20,6 @@ class QuizState(TypedDict, total=False):
     score: int
     total_attempts: int
 
+    question_history: list[dict]
+
     language: str

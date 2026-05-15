@@ -212,14 +212,30 @@ def finalize_question(state: QuizState) -> dict:
         "correct_option": correct_option,
     })
 
-    return {"last_feedback": text}
+    options = state.get("options", [])
+    user_answer = state.get("user_answer", "")
+    correct_full = next((o for o in options if o.startswith(correct_option + ".")), correct_option)
+    answer_full = next((o for o in options if o.startswith(user_answer + ".")), user_answer)
+
+    return {
+        "last_feedback": text,
+        "question_history": [
+            *(state.get("question_history") or []),
+            {
+                "question": state.get("current_question", ""),
+                "correct_option": correct_full,
+                "user_answer": answer_full,
+                "is_correct": is_correct,
+            },
+        ],
+    }
 
 
 def update_progress(state: QuizState) -> dict:
     writer = get_stream_writer()
 
     score = state.get("score", 0)
-    if state.get("is_correct") and state.get("is_first_attempt"):
+    if state.get("is_correct"):
         score += 1
 
     writer({

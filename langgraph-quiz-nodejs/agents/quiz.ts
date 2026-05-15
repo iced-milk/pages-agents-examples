@@ -104,6 +104,7 @@ async function streamGraph(
                 total,
                 total_attempts: attempts,
                 avg_attempts: avg,
+                question_history: finalValues.question_history ?? [],
               })
             )
           );
@@ -281,6 +282,7 @@ async function handleResume(
           hint_given: v.hint_given ?? false,
           last_feedback: v.last_feedback || "",
           language: v.language || "zh",
+          question_history: v.question_history || [],
         },
         max_attempts: MAX_ATTEMPTS,
       }),

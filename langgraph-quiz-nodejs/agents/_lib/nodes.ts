@@ -262,7 +262,18 @@ export function finalizeQuestion(
     correct_option: correctOption,
   });
 
-  return { last_feedback: text };
+  return {
+    last_feedback: text,
+    question_history: [
+      ...(state.question_history ?? []),
+      {
+        question: state.current_question,
+        correct_option: state.options?.find((o: string) => o.startsWith(correctOption + ".")) || correctOption,
+        user_answer: state.options?.find((o: string) => o.startsWith((state.user_answer ?? "") + ".")) ?? (state.user_answer ?? ""),
+        is_correct: isCorrect,
+      },
+    ],
+  };
 }
 
 export function updateProgress(
@@ -272,7 +283,7 @@ export function updateProgress(
   const writer = config.writer!;
 
   let score = state.score ?? 0;
-  if (state.is_correct && state.is_first_attempt) {
+  if (state.is_correct) {
     score += 1;
   }
 

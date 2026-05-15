@@ -80,6 +80,7 @@ async def _run_graph(graph_instance, payload: Any, config: dict) -> AsyncIterato
                 "total": total,
                 "total_attempts": attempts,
                 "avg_attempts": avg,
+                "question_history": final_values.get("question_history") or [],
             })
 
     except Exception as exc:
@@ -169,6 +170,7 @@ async def _handle_resume(graph_instance, conversation_id):
                 "hint_given": v.get("hint_given", False),
                 "last_feedback": v.get("last_feedback", ""),
                 "language": v.get("language", "zh"),
+                "question_history": v.get("question_history") or [],
             },
             "max_attempts": MAX_ATTEMPTS,
         }

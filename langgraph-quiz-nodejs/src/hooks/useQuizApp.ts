@@ -269,6 +269,7 @@ export function useQuizApp() {
             total,
             total_attempts: attempts,
             avg_attempts: total ? Math.round((attempts / total) * 100) / 100 : 0,
+            question_history: st.question_history || [],
           },
         }));
       } else {

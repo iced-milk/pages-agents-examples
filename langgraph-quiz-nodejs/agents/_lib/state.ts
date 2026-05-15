@@ -20,6 +20,13 @@ export const QuizState = new StateSchema({
   score: z.number(),
   total_attempts: z.number(),
 
+  question_history: z.array(z.object({
+    question: z.string(),
+    correct_option: z.string(),
+    user_answer: z.string(),
+    is_correct: z.boolean(),
+  })).default([]),
+
   language: z.string(),
 });
 

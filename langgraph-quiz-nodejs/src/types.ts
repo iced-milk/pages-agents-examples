@@ -63,11 +63,19 @@ export interface WaitingEvent {
   max_attempts: number;
 }
 
+export interface QuestionHistoryItem {
+  question: string;
+  correct_option: string;
+  user_answer: string;
+  is_correct: boolean;
+}
+
 export interface CompleteEvent {
   final_score: number;
   total: number;
   total_attempts: number;
   avg_attempts: number;
+  question_history?: QuestionHistoryItem[];
 }
 
 export interface ErrorEvent {

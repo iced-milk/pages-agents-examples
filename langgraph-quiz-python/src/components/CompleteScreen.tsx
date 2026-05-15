@@ -10,6 +10,7 @@ export function CompleteScreen({
   onRestart: () => void;
 }) {
   const { t } = useTranslation();
+  const history = result.question_history ?? [];
 
   return (
     <div className="bg-white border border-zinc-200 rounded-lg p-10 md:p-12 min-h-[440px] flex flex-col items-center justify-center gap-5 text-center animate-fade-in">
@@ -36,6 +37,38 @@ export function CompleteScreen({
         <span className="w-px h-5 bg-zinc-200" aria-hidden />
         <Stat value={result.avg_attempts.toFixed(1)} label="avg attempts" />
       </div>
+
+      {history.length > 0 && (
+        <div className="mt-4 w-full max-w-lg text-left">
+          <table className="w-full text-xs border-collapse">
+            <thead>
+              <tr className="border-b border-zinc-200 text-zinc-400 uppercase tracking-wider">
+                <th className="py-2 pr-3 font-medium text-left">#</th>
+                <th className="py-2 pr-3 font-medium text-left">{t("quiz.history_question")}</th>
+                <th className="py-2 pr-3 font-medium text-center">{t("quiz.history_answer")}</th>
+                <th className="py-2 font-medium text-center">{t("quiz.history_correct")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {history.map((item, idx) => (
+                <tr key={idx} className="border-b border-zinc-100 last:border-b-0">
+                  <td className="py-2 pr-3 text-zinc-400 tabular-nums">{idx + 1}</td>
+                  <td className="py-2 pr-3 text-zinc-700 leading-relaxed">{item.question}</td>
+                  <td className={
+                    "py-2 pr-3 text-center font-mono font-medium " +
+                    (item.is_correct ? "text-green-600" : "text-red-500")
+                  }>
+                    {item.user_answer || "—"}
+                  </td>
+                  <td className="py-2 text-center font-mono font-medium text-zinc-600">
+                    {item.correct_option}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <button
         onClick={onRestart}
