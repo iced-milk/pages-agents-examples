@@ -5,12 +5,24 @@ from typing import Any, AsyncIterator
 
 from langgraph.types import Command
 
-from ._lib.graph import graph
+from ._lib.graph import build_graph
 from ._lib.nodes import init_models
 from ._lib.state import MAX_ATTEMPTS
 from ._lib.logger import create_logger
 
 logger = create_logger("quiz")
+
+# ─── Singleton graph (lazy init with platform checkpointer) ───
+
+_graph = None
+
+
+def _get_graph(checkpointer, store):
+    global _graph
+    if _graph is None:
+        logger.log("Initializing graph with platform checkpointer and store...")
+        _graph = build_graph(checkpointer, store)
+    return _graph
 
 
 def _get_env(context_env) -> dict[str, str]:
@@ -26,9 +38,9 @@ def _sse_frame(event: str, data: Any) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-async def _run_graph(payload: Any, config: dict) -> AsyncIterator[str]:
+async def _run_graph(graph_instance, payload: Any, config: dict) -> AsyncIterator[str]:
     try:
-        async for chunk in graph.astream(
+        async for chunk in graph_instance.astream(
             payload, config=config, stream_mode=["updates", "custom", "messages"], version="v2"
         ):
             mode = chunk["type"]
@@ -57,7 +69,7 @@ async def _run_graph(payload: Any, config: dict) -> AsyncIterator[str]:
                     continue
                 yield _sse_frame("hint_token", {"delta": delta})
 
-        state = graph.get_state(config)
+        state = await graph_instance.aget_state(config)
         if not state.next:
             final_values = state.values or {}
             total = final_values.get("total_questions") or 0
@@ -75,7 +87,7 @@ async def _run_graph(payload: Any, config: dict) -> AsyncIterator[str]:
         yield _sse_frame("error", {"message": str(exc)})
 
 
-async def _handle_start(context, body: dict):
+async def _handle_start(graph_instance, context, body: dict):
     conversation_id = context.conversation_id
     language = body.get("language", "zh")
     total_questions = body.get("total_questions", 5)
@@ -96,13 +108,13 @@ async def _handle_start(context, body: dict):
 
     async def gen():
         yield _sse_frame("session", {"thread_id": conversation_id, "max_attempts": MAX_ATTEMPTS})
-        async for frame in _stream_with_cancel(context, _run_graph(initial, config)):
+        async for frame in _stream_with_cancel(context, _run_graph(graph_instance, initial, config)):
             yield frame
 
     return context.utils.stream_sse(gen())
 
 
-async def _handle_answer(context, body: dict):
+async def _handle_answer(graph_instance, context, body: dict):
     conversation_id = context.conversation_id
     answer = body.get("answer")
 
@@ -115,7 +127,7 @@ async def _handle_answer(context, body: dict):
     config = {"configurable": {"thread_id": conversation_id}}
 
     try:
-        state = graph.get_state(config)
+        state = await graph_instance.aget_state(config)
         if not state.next:
             return {"status_code": 400, "body": {"detail": "thread already finished"}}
     except Exception:
@@ -126,15 +138,46 @@ async def _handle_answer(context, body: dict):
 
     async def gen():
         async for frame in _stream_with_cancel(
-            context, _run_graph(Command(resume=answer_letter), config)
+            context, _run_graph(graph_instance, Command(resume=answer_letter), config)
         ):
             yield frame
 
     return context.utils.stream_sse(gen())
 
 
-def _handle_graph():
-    mermaid_src = graph.get_graph().draw_mermaid(with_styles=False)
+async def _handle_resume(graph_instance, conversation_id):
+    config = {"configurable": {"thread_id": conversation_id}}
+    try:
+        state = await graph_instance.aget_state(config)
+        if not state.values:
+            return {"status": "no_session"}
+
+        v = state.values
+        is_finished = not state.next
+
+        return {
+            "status": "completed" if is_finished else "in_progress",
+            "state": {
+                "question": v.get("current_question", ""),
+                "options": v.get("options", []),
+                "correct_option": v.get("correct_option", ""),
+                "question_number": v.get("question_number", 0),
+                "total_questions": v.get("total_questions", 5),
+                "score": v.get("score", 0),
+                "total_attempts": v.get("total_attempts", 0),
+                "is_first_attempt": v.get("is_first_attempt", True),
+                "hint_given": v.get("hint_given", False),
+                "last_feedback": v.get("last_feedback", ""),
+                "language": v.get("language", "zh"),
+            },
+            "max_attempts": MAX_ATTEMPTS,
+        }
+    except Exception:
+        return {"status": "no_session"}
+
+
+def _handle_graph(graph_instance):
+    mermaid_src = graph_instance.get_graph().draw_mermaid(with_styles=False)
     return {"mermaid": mermaid_src}
 
 
@@ -199,12 +242,19 @@ async def handler(context):
         logger.error(msg)
         return {"status_code": 500, "body": {"error": msg}}
 
+    # Get memory adapters from context
+    checkpointer = context.memory.langgraph_checkpointer
+    store = context.memory.langgraph_store
+    graph_instance = _get_graph(checkpointer, store)
+
     match action:
         case "start":
-            return await _handle_start(context, body)
+            return await _handle_start(graph_instance, context, body)
         case "answer":
-            return await _handle_answer(context, body)
+            return await _handle_answer(graph_instance, context, body)
+        case "resume":
+            return await _handle_resume(graph_instance, context.conversation_id)
         case "graph":
-            return _handle_graph()
+            return _handle_graph(graph_instance)
         case _:
             return {"status_code": 400, "body": {"detail": f"Unknown action: {action}"}}

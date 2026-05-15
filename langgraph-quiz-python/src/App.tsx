@@ -50,7 +50,14 @@ function Shell() {
         </aside>
 
         <section className="flex flex-col gap-4 max-w-2xl w-full">
-          {!s.isStarted && (
+          {s.isResuming && (
+            <div className="bg-white border border-zinc-200 rounded-lg p-10 md:p-12 min-h-[480px] flex flex-col items-center justify-center gap-4 animate-fade-in">
+              <span className="w-5 h-5 rounded-full border-2 border-zinc-300 border-t-zinc-900 animate-spin" />
+              <span className="text-sm text-zinc-500">{t("quiz.resuming")}</span>
+            </div>
+          )}
+
+          {!s.isResuming && !s.isStarted && (
             <WelcomeScreen onStart={() => start(lang)} loading={isLoading} />
           )}
 

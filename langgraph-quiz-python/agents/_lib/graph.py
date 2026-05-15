@@ -1,4 +1,3 @@
-from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from .nodes import (
@@ -14,7 +13,7 @@ from .nodes import (
 from .state import QuizState
 
 
-def build_graph():
+def build_graph(checkpointer=None, store=None):
     builder = StateGraph(QuizState)
 
     builder.add_node("generate_question", generate_question)
@@ -46,7 +45,5 @@ def build_graph():
         },
     )
 
-    return builder.compile(checkpointer=InMemorySaver())
+    return builder.compile(checkpointer=checkpointer, store=store)
 
-
-graph = build_graph()

@@ -15,6 +15,7 @@ export default {
     preparing_next: "AI is preparing the next question",
     complete_title: "Quiz finished",
     complete_score: "You got {{score}} / {{total}} correct",
+    resuming: "Resuming quiz...",
     subtitle: "5 trivia questions to explore LangGraph's core features",
     feature_ai: "AI-generated",
     feature_flow: "Live graph",

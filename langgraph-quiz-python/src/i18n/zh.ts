@@ -15,6 +15,7 @@ export default {
     preparing_next: "AI 正在出下一题",
     complete_title: "闯关结束",
     complete_score: "你答对了 {{score}} / {{total}} 题",
+    resuming: "恢复答题中...",
     subtitle: "5 道趣味常识题，体验 LangGraph 的核心能力",
     feature_ai: "AI 出题",
     feature_flow: "实时流转",
