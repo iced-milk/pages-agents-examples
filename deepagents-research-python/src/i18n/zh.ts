@@ -39,4 +39,8 @@ export const zh: Translations = {
 
   you: "你",
   coordinator: "首席研究员",
+
+  recentConversations: "近期会话",
+  loadingHistory: "加载会话中...",
+  deleteConversation: "删除",
 };

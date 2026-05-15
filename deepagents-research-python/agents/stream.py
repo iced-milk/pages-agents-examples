@@ -50,6 +50,7 @@ from langchain.agents.middleware import (
 from langchain_core.messages import AIMessageChunk, ToolMessage
 from langchain_community.tools import DuckDuckGoSearchResults
 from deepagents import create_deep_agent
+from deepagents.backends import CompositeBackend, StateBackend, StoreBackend
 
 from ._logger import create_logger
 
@@ -92,7 +93,7 @@ def _get_model(env: dict[str, str]):
     return _model
 
 
-def _get_agent(model):
+def _get_agent(model, checkpointer, store):
     global _agent
     if _agent is None:
         logger.log("Initializing research agent...")
@@ -148,6 +149,17 @@ def _get_agent(model):
             middleware=[
                 ModelRetryMiddleware(max_retries=3),
             ],
+            checkpointer=checkpointer,
+            store=store,
+            backend=CompositeBackend(
+                StateBackend(),
+                {
+                    "/memories/": StoreBackend(
+                        namespace=lambda _: ("agent", "memories"),
+                    ),
+                },
+            ),
+            memory=["/memories/AGENTS.md"],
         )
     else:
         logger.log("Agent already initialized, reusing")
@@ -156,7 +168,7 @@ def _get_agent(model):
 
 # ─── SSE event stream generator ───
 
-async def _event_stream(agent, message: str, utils):
+async def _event_stream(agent, message: str, conversation_id: str, utils):
     """Async generator that yields SSE-formatted strings.
 
     See module docstring for the event contract.
@@ -209,6 +221,7 @@ async def _event_stream(agent, message: str, utils):
     try:
         async for chunk in agent.astream(
             {"messages": [{"role": "user", "content": message}]},
+            config={"configurable": {"thread_id": conversation_id}},
             stream_mode=["updates", "messages"],
             subgraphs=True,
             version="v2",
@@ -406,10 +419,101 @@ async def _event_stream(agent, message: str, utils):
 # ─── EdgeOne Pages handler ───
 
 async def handler(context):
-    logger.log("conversationId:", getattr(context, "conversation_id", None),
+    conversation_id = getattr(context, "conversation_id", None)
+    logger.log("conversationId:", conversation_id,
                "runId:", getattr(context, "run_id", None))
 
     body = context.request.body or {}
+    action = body.get("action", "chat")
+
+    # Get memory adapters from context
+    checkpointer = context.memory.langgraph_checkpointer
+    store = context.memory.langgraph_store
+
+    try:
+        env = _get_env(context.env)
+        model = _get_model(env)
+        agent_instance = _get_agent(model, checkpointer, store)
+    except Exception as e:
+        msg = str(e)
+        logger.error(msg)
+        return {"status_code": 500, "body": {"error": msg}}
+
+    # ── action: history — restore conversation from checkpointer ──
+    if action == "history":
+        thread_id = body.get("conversationId")
+        logger.log("history request for threadId:", thread_id)
+        if not thread_id:
+            return {"status_code": 200, "body": {"items": []}}
+        try:
+            state = await agent_instance.aget_state(
+                {"configurable": {"thread_id": thread_id}}
+            )
+            raw_messages = (state.values or {}).get("messages", []) if state else []
+
+            # Build an ordered items array preserving the original conversation flow.
+            # Each item has a type so the frontend can reconstruct messages + subagent groups.
+            items = []
+
+            # Map tool_call_id -> task info for matching ToolMessages later
+            pending_tasks: dict[str, dict] = {}
+
+            for m in raw_messages:
+                msg_type = getattr(m, "type", None)
+
+                if msg_type == "human":
+                    content = getattr(m, "content", "")
+                    if isinstance(content, str) and content:
+                        items.append({"type": "user", "content": content})
+                    continue
+
+                if msg_type == "ai":
+                    # Extract text content (may be string or list of content blocks)
+                    content = getattr(m, "content", "")
+                    if isinstance(content, str):
+                        text_content = content
+                    elif isinstance(content, list):
+                        text_content = "".join(
+                            p.get("text", "") for p in content
+                            if isinstance(p, dict) and p.get("type") == "text"
+                        )
+                    else:
+                        text_content = ""
+
+                    # Check for task tool_calls (subagent delegations)
+                    for tc in getattr(m, "tool_calls", []) or []:
+                        if tc.get("name") == "task" and tc.get("id"):
+                            pending_tasks[tc["id"]] = {
+                                "description": ((tc.get("args") or {}).get("description", "") or "")[:500],
+                                "subagentType": (tc.get("args") or {}).get("subagent_type", "researcher"),
+                            }
+
+                    if text_content:
+                        items.append({"type": "coordinator", "content": text_content})
+                    continue
+
+                if msg_type == "tool":
+                    tool_call_id = getattr(m, "tool_call_id", "") or ""
+                    tool_name = getattr(m, "name", "") or ""
+                    if tool_name == "task" and tool_call_id in pending_tasks:
+                        task_info = pending_tasks.pop(tool_call_id)
+                        result_content = getattr(m, "content", "")
+                        items.append({
+                            "type": "subagentTask",
+                            "id": tool_call_id,
+                            "description": task_info["description"],
+                            "subagentType": task_info["subagentType"],
+                            "content": result_content if isinstance(result_content, str) else "",
+                        })
+                    continue
+
+            logger.log("history: found", len(items), "items")
+            return {"status_code": 200, "body": {"items": items}}
+        except Exception as e:
+            logger.error("history error:", str(e))
+            return {"status_code": 200, "body": {"items": []}}
+
+    # ── action: chat (default) — normal SSE streaming ──
     message = body.get("message")
     logger.log("user message:", message)
 
@@ -417,17 +521,8 @@ async def handler(context):
         logger.error("Missing chat message")
         return {"status_code": 400, "body": "Missing chat message"}
 
-    try:
-        env = _get_env(context.env)
-        model = _get_model(env)
-        agent_instance = _get_agent(model)
-    except Exception as e:
-        msg = str(e)
-        logger.error(msg)
-        return {"status_code": 500, "body": {"error": msg}}
-
     async def gen():
-        agen = _event_stream(agent_instance, message, context.utils).__aiter__()
+        agen = _event_stream(agent_instance, message, conversation_id, context.utils).__aiter__()
         cancel_task = asyncio.ensure_future(context.request.signal.wait())
         pending: asyncio.Task | None = None
         try:

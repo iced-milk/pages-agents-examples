@@ -16,6 +16,12 @@ export function DurationDisplay({
       return;
     }
 
+    // No duration and no valid startedAt — nothing to display (restored history)
+    if (!startedAt) {
+      if (ref.current) ref.current.textContent = '';
+      return;
+    }
+
     const tick = () => {
       if (ref.current) {
         const elapsed = (Date.now() - startedAt) / 1000;

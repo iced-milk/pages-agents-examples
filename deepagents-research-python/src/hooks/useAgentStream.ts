@@ -11,7 +11,7 @@
  * `pages-agent-conversation-id` header so EdgeOne routes to the same agent instance.
  */
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   ChatMessage,
   FlowItem,
@@ -95,18 +95,61 @@ function nextOrder(): number {
 
 // -- Hook --
 
+// localStorage key for conversation history list
+const CONVERSATIONS_KEY = 'deepagents-conversations';
+
+interface StoredConversation {
+  id: string;
+  title: string;
+  timestamp: number;
+}
+
+function getStoredConversations(): StoredConversation[] {
+  try {
+    return JSON.parse(localStorage.getItem(CONVERSATIONS_KEY) || '[]');
+  } catch {
+    return [];
+  }
+}
+
+function saveConversationToStorage(id: string, title: string) {
+  const list = getStoredConversations();
+  // Don't duplicate
+  if (list.find((c) => c.id === id)) return;
+  list.unshift({ id, title: title.slice(0, 50), timestamp: Date.now() });
+  // Keep max 20 recent conversations
+  if (list.length > 20) list.pop();
+  localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(list));
+}
+
+function removeConversationFromStorage(id: string) {
+  const list = getStoredConversations().filter((c) => c.id !== id);
+  localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(list));
+}
+
+// Get initial conversation ID from URL ?id= or generate new one
+function getInitialConversationId(): string {
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlId = urlParams.get('id');
+  if (urlId) return urlId;
+  return crypto.randomUUID();
+}
+
 export function useAgentStream() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [subAgentGroups, setSubAgentGroups] = useState<SubAgentGroup[]>([]);
   const [phase, setPhase] = useState<ResearchPhase>("idle");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
   const wasCancelledRef = useRef(false);
 
-  // ConversationId: generated once, fixed for the entire session.
+  // ConversationId: from URL ?id= param or generate a new one.
   // Reset on new chat to start a fresh conversation.
-  const conversationIdRef = useRef<string>(crypto.randomUUID());
+  const conversationIdRef = useRef<string>(getInitialConversationId());
+  // Track whether first message has been saved to localStorage
+  const conversationSavedRef = useRef(false);
 
   // Bidirectional mapping: subagent_id <-> card_id (tool_call_id)
   const saToCardRef = useRef<Map<string, string>>(new Map());
@@ -201,6 +244,14 @@ export function useAgentStream() {
       setMessages((prev) => [...prev, userMsg]);
       setPhase("planning");
       setIsStreaming(true);
+
+      // Save conversation to localStorage on first message
+      if (!conversationSavedRef.current) {
+        saveConversationToStorage(conversationIdRef.current, text);
+        conversationSavedRef.current = true;
+        // Update URL with conversation id
+        window.history.replaceState(null, '', '?id=' + conversationIdRef.current);
+      }
 
       const controller = new AbortController();
       abortRef.current = controller;
@@ -644,21 +695,164 @@ export function useAgentStream() {
     setSubAgentGroups([]);
     setPhase("idle");
     setIsStreaming(false);
+    setIsLoadingHistory(false);
     saToCardRef.current.clear();
     cardToGroupRef.current.clear();
     _orderIdx = 0;
     // Generate new conversationId for fresh conversation
     conversationIdRef.current = crypto.randomUUID();
+    conversationSavedRef.current = false;
+    // Clear URL params
+    window.history.replaceState(null, '', window.location.pathname);
   }, [stopStreaming]);
+
+  // -- Load conversation from backend (restore history) --
+
+  const loadConversation = useCallback(
+    async (targetConversationId: string) => {
+      if (isStreaming) return;
+      setIsLoadingHistory(true);
+      setMessages([]);
+      setSubAgentGroups([]);
+      setPhase("idle");
+      saToCardRef.current.clear();
+      cardToGroupRef.current.clear();
+      _orderIdx = 0;
+
+      // Update conversationId and URL
+      conversationIdRef.current = targetConversationId;
+      conversationSavedRef.current = true;
+      window.history.replaceState(null, '', '?id=' + targetConversationId);
+
+      try {
+        const resp = await fetch("/stream", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "pages-agent-conversation-id": targetConversationId,
+          },
+          body: JSON.stringify({ action: "history", conversationId: targetConversationId }),
+        });
+
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        const items: Array<
+          | { type: "user"; content: string }
+          | { type: "coordinator"; content: string }
+          | { type: "subagentTask"; id: string; description: string; subagentType: string; content: string }
+        > = data.items || [];
+
+        // Rebuild messages + subagent groups in original order
+        const restoredMessages: ChatMessage[] = [];
+        const restoredGroups: SubAgentGroup[] = [];
+        let currentGroupTasks: SubAgentTask[] = [];
+        let lastCoordinatorMsgId: string | null = null;
+
+        for (const item of items) {
+          if (item.type === "user") {
+            // Flush any pending subagent group before a new turn
+            if (currentGroupTasks.length > 0) {
+              restoredGroups.push({
+                id: `group-restored-${restoredGroups.length}-${Date.now()}`,
+                tasks: currentGroupTasks,
+                triggeredByMessageId: lastCoordinatorMsgId || undefined,
+                orderIdx: ++_orderIdx,
+              });
+              if (lastCoordinatorMsgId) {
+                const m = restoredMessages.find((msg) => msg.id === lastCoordinatorMsgId);
+                if (m) m.hasSubAgents = true;
+              }
+              currentGroupTasks = [];
+              lastCoordinatorMsgId = null;
+            }
+
+            const id = `restored-${restoredMessages.length}-${Date.now()}`;
+            restoredMessages.push({ id, role: "user", content: item.content, orderIdx: ++_orderIdx });
+          } else if (item.type === "coordinator") {
+            // Flush pending group before the synthesis message
+            if (currentGroupTasks.length > 0) {
+              restoredGroups.push({
+                id: `group-restored-${restoredGroups.length}-${Date.now()}`,
+                tasks: currentGroupTasks,
+                triggeredByMessageId: lastCoordinatorMsgId || undefined,
+                orderIdx: ++_orderIdx,
+              });
+              if (lastCoordinatorMsgId) {
+                const m = restoredMessages.find((msg) => msg.id === lastCoordinatorMsgId);
+                if (m) m.hasSubAgents = true;
+              }
+              currentGroupTasks = [];
+            }
+
+            const id = `restored-${restoredMessages.length}-${Date.now()}`;
+            lastCoordinatorMsgId = id;
+            restoredMessages.push({ id, role: "assistant", content: item.content, orderIdx: ++_orderIdx });
+          } else if (item.type === "subagentTask") {
+            currentGroupTasks.push({
+              id: item.id,
+              description: item.description,
+              status: "complete",
+              content: item.content,
+              toolCalls: [],
+              startedAt: 0,
+              subagentType: item.subagentType,
+            });
+          }
+        }
+
+        // Flush any remaining group
+        if (currentGroupTasks.length > 0) {
+          restoredGroups.push({
+            id: `group-restored-${restoredGroups.length}-${Date.now()}`,
+            tasks: currentGroupTasks,
+            triggeredByMessageId: lastCoordinatorMsgId || undefined,
+            orderIdx: ++_orderIdx,
+          });
+          if (lastCoordinatorMsgId) {
+            const m = restoredMessages.find((msg) => msg.id === lastCoordinatorMsgId);
+            if (m) m.hasSubAgents = true;
+          }
+        }
+
+        setMessages(restoredMessages);
+        setSubAgentGroups(restoredGroups);
+        if (restoredMessages.length > 0) {
+          setPhase("complete");
+        }
+      } catch (err) {
+        console.error("Failed to load conversation history:", err);
+      } finally {
+        setIsLoadingHistory(false);
+      }
+    },
+    [isStreaming]
+  );
+
+  // -- Auto-restore conversation on mount if URL has ?id= --
+
+  const hasAutoLoaded = useRef(false);
+  useEffect(() => {
+    if (hasAutoLoaded.current) return;
+    hasAutoLoaded.current = true;
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlId = urlParams.get('id');
+    if (urlId) {
+      loadConversation(urlId);
+    }
+  }, [loadConversation]);
 
   return {
     messages,
     subAgentGroups,
     phase,
     isStreaming,
+    isLoadingHistory,
     sendMessage,
     stopStreaming,
     resetChat,
     buildFlowItems,
+    loadConversation,
+    getStoredConversations,
+    removeConversationFromStorage,
   };
 }
