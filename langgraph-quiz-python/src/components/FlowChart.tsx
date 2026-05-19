@@ -56,6 +56,7 @@ export function FlowChart({ currentNode, completedNodes }: Props) {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const [source, setSource] = useState<string | null>(null);
+  const [svgReady, setSvgReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Fetch mermaid source from backend
@@ -89,6 +90,7 @@ export function FlowChart({ currentNode, completedNodes }: Props) {
     const id = `quiz-flow-${Math.random().toString(36).slice(2, 8)}`;
     let cancelled = false;
 
+    setSvgReady(false);
     mermaid
       .render(id, source)
       .then(({ svg, bindFunctions }) => {
@@ -104,6 +106,7 @@ export function FlowChart({ currentNode, completedNodes }: Props) {
           svgEl.style.height = "auto";
           svgEl.style.maxHeight = "520px";
         }
+        setSvgReady(true);
       })
       .catch((e) => {
         if (!cancelled) setError(String(e?.message ?? e));
@@ -117,7 +120,7 @@ export function FlowChart({ currentNode, completedNodes }: Props) {
   // Toggle is-active / is-done classes on nodes
   useEffect(() => {
     const root = containerRef.current;
-    if (!root) return;
+    if (!root || !svgReady) return;
 
     root.querySelectorAll<SVGGElement>("g.node").forEach((g) => {
       g.classList.remove("is-active", "is-done");
@@ -141,7 +144,7 @@ export function FlowChart({ currentNode, completedNodes }: Props) {
         el.classList.add("is-active");
       }
     }
-  }, [currentNode, completedNodes, source]);
+  }, [currentNode, completedNodes, svgReady]);
 
   return (
     <div className="flex flex-col">
