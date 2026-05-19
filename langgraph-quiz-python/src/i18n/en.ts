@@ -36,6 +36,7 @@ export default {
   },
   flow: {
     title: "LangGraph flow",
+    loading: "Loading flow chart…",
     log_title: "Node events",
     log_empty: "No events yet",
     log_hint: "Node execution records will show here after you start",

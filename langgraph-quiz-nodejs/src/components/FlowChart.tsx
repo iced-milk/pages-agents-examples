@@ -152,6 +152,16 @@ export function FlowChart({ currentNode, completedNodes }: Props) {
         {t("flow.title")}
       </h3>
 
+      {!svgReady && !error && (
+        <div className="flex items-center justify-center gap-2 py-8 text-xs text-zinc-400 min-h-[260px]">
+          <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+          <span>{t("flow.loading")}</span>
+        </div>
+      )}
+
       <div
         ref={containerRef}
         className="quiz-flow w-full"

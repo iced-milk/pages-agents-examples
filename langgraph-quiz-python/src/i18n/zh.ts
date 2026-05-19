@@ -36,6 +36,7 @@ export default {
   },
   flow: {
     title: "LangGraph 流程",
+    loading: "加载流程图…",
     log_title: "节点事件",
     log_empty: "尚无节点事件",
     log_hint: "点击开始后，这里会显示节点执行记录",
