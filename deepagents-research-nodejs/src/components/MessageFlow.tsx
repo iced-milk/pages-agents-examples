@@ -164,6 +164,42 @@ export function MessageFlow({ items, isStreaming }: MessageFlowProps) {
               return null;
           }
         })}
+        {/* Thinking indicator: shown when streaming but no AI response yet */}
+        {isStreaming &&
+          items.length > 0 &&
+          items[items.length - 1].type === "user_message" && (
+            <div
+              className="flex justify-start"
+              style={{ animation: "fadeIn 0.2s ease" }}
+            >
+              <div className="max-w-[90%]">
+                <div className="mb-1.5 flex items-center gap-2">
+                  <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-teal-50">
+                    <svg
+                      className="h-3.5 w-3.5 text-teal-600"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={1.5}
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"
+                      />
+                    </svg>
+                  </div>
+                  <span className="text-sm font-semibold text-teal-700">
+                    {t.coordinator}
+                  </span>
+                </div>
+                <div className="relative pl-4 text-[13px] leading-relaxed text-slate-500">
+                  <div className="absolute left-0 top-0 bottom-0 w-[2px] rounded-full bg-teal-400 animate-pulse" />
+                  <TypingIndicator />
+                </div>
+              </div>
+            </div>
+          )}
         <div ref={bottomRef} />
       </div>
     </div>

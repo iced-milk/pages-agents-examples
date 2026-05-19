@@ -667,24 +667,28 @@ export function useAgentStream() {
 
   // -- Stop streaming --
 
-  const stopStreaming = useCallback(async () => {
+  const stopStreaming = useCallback(() => {
     wasCancelledRef.current = true;
 
-    // Call the /stop endpoint to abort the active run on server side
-    try {
-      await fetch("/stop", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "pages-agent-conversation-id": conversationIdRef.current,
-        },
-        body: JSON.stringify({ conversationId: conversationIdRef.current }),
-      });
-    } catch {
-      // ignore stop request failure
-    }
-
+    // Abort the client-side stream immediately so any subsequent sendMessage
+    // won't be interfered with by a late-arriving /stop response.
     abortRef.current?.abort();
+    abortRef.current = null;
+
+    // Fire-and-forget: notify the server to cancel the active run.
+    // We intentionally do NOT await this — waiting for the response caused a
+    // race where the delayed response would abort a newly-started conversation.
+    const convId = conversationIdRef.current;
+    fetch("/stop", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "pages-agent-conversation-id": convId,
+      },
+      body: JSON.stringify({ conversationId: convId }),
+    }).catch(() => {
+      // ignore stop request failure
+    });
   }, []);
 
   // -- Reset for new conversation --
