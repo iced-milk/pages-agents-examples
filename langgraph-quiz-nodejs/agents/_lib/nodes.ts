@@ -1,7 +1,6 @@
 import { ChatOpenAI } from "@langchain/openai";
 import { interrupt } from "@langchain/langgraph";
 import { z } from "zod";
-import { zodToJsonSchema } from "zod-to-json-schema";
 import type { LangGraphRunnableConfig } from "@langchain/langgraph";
 import type { Runnable } from "@langchain/core/runnables";
 import type { AIMessageChunk } from "@langchain/core/messages";
@@ -55,7 +54,7 @@ export function initModels(env: Env) {
           function: {
             name: "generate_question",
             description: "Generate a quiz question with 4 options and the correct letter.",
-            parameters: zodToJsonSchema(GeneratedQuestionSchema),
+            parameters: z.toJSONSchema(GeneratedQuestionSchema),
           },
         },
       ],
@@ -92,9 +91,14 @@ export async function generateQuestion(
   const questionNumber = (state.question_number ?? 0) + 1;
   const totalQuestions = state.total_questions ?? 5;
 
+  const history = state.question_history ?? [];
+  const askedList = history.length
+    ? history.map((h, i) => `${i + 1}. ${h.question}`).join("\n")
+    : "(none yet)";
+
   const system = formatPrompt(QUESTION_SYSTEM_PROMPT, {
     language_name: languageName(language),
-    asked_questions: state.current_question || "(none yet)",
+    asked_questions: askedList,
   });
   const human =
     "Generate the next question now. Remember: write it in " +

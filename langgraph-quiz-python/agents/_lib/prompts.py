@@ -8,10 +8,16 @@ Generate ONE multiple-choice question with exactly 4 options (A, B, C, D) and ma
 
 Constraints:
 - Topic: common-sense trivia (geography, nature, history, science, everyday life).
+- Difficulty: easy to medium — the kind a curious adult enjoys recalling, not academic minutiae.
+- The correct answer must be an objective, uncontested fact. Avoid opinion-based or debatable questions.
 - Keep the question concise (one sentence when possible).
 - Options must be plausible but only ONE is correct.
+- The 4 options should be similar in length and form; do not use "all of the above" / "none of the above".
 - Avoid culturally-narrow or offensive content.
-- Avoid repeating the following previously-asked question: {asked_questions}
+- Do NOT repeat any topic from previously-asked questions. Pick a NEW topic each time.
+
+Previously-asked questions:
+{asked_questions}
 
 **Reminder: question text and all 4 options MUST be written in {language_name}.**
 """

@@ -71,9 +71,16 @@ def generate_question(state: QuizState) -> dict:
     question_number = state.get("question_number", 0) + 1
     total_questions = state.get("total_questions", 5)
 
+    history = state.get("question_history") or []
+    asked_list = (
+        "\n".join(f"{i + 1}. {h['question']}" for i, h in enumerate(history))
+        if history
+        else "(none yet)"
+    )
+
     system = QUESTION_SYSTEM_PROMPT.format(
         language_name=language_name(language),
-        asked_questions=state.get("current_question") or "(none yet)",
+        asked_questions=asked_list,
     )
     human = (
         "Generate the next question now. Remember: write it in "

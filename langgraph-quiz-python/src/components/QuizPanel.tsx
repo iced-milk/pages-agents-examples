@@ -67,6 +67,11 @@ export function QuizPanel(props: Props) {
           const isSelected = props.selectedOption === letter;
           const isCorrectReveal =
             props.revealedCorrectOption === letter && props.status === "done";
+          // Spinner while the backend evaluates the picked option.
+          const isJudging =
+            isSelected &&
+            props.status === "thinking" &&
+            !props.revealedCorrectOption;
 
           return (
             <button
@@ -97,6 +102,7 @@ export function QuizPanel(props: Props) {
               >
                 {labelText}
               </span>
+              {isJudging && <Spinner size="sm" />}
               {isWrongChosen && <XIcon className="w-4 h-4 text-red-500" />}
               {isCorrectReveal && <CheckIcon className="w-4 h-4 text-green-600" />}
             </button>
