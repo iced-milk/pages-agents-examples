@@ -84,9 +84,6 @@ async function getModel(env: Env): Promise<Model> {
       apiKey: env.AI_GATEWAY_API_KEY,
       configuration: {
         baseURL: env.AI_GATEWAY_BASE_URL,
-        defaultHeaders: {
-          'X-Gateway-Quota-Bypass': 'true',
-        },
       },
       temperature: 0,
       timeout: 300_000,

@@ -28,9 +28,6 @@ function buildModel(env: Env, extra?: { temperature?: number; tags?: string[] })
     apiKey: env.AI_GATEWAY_API_KEY,
     configuration: {
       baseURL: env.AI_GATEWAY_BASE_URL,
-      defaultHeaders: {
-        "X-Gateway-Quota-Bypass": "true",
-      },
     },
     temperature: extra?.temperature ?? 0.7,
     tags: extra?.tags,

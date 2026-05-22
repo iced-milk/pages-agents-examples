@@ -22,7 +22,6 @@ def init_models(env: dict[str, str]):
             api_key=env["AI_GATEWAY_API_KEY"],
             base_url=env["AI_GATEWAY_BASE_URL"],
             model_provider="openai",
-            default_headers={"X-Gateway-Quota-Bypass": "true"},
             temperature=0.7,
         )
         _question_model_cache = base.with_structured_output(
@@ -34,7 +33,6 @@ def init_models(env: dict[str, str]):
             api_key=env["AI_GATEWAY_API_KEY"],
             base_url=env["AI_GATEWAY_BASE_URL"],
             model_provider="openai",
-            default_headers={"X-Gateway-Quota-Bypass": "true"},
             temperature=0.7,
             tags=["hint"],
         )

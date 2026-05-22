@@ -84,9 +84,6 @@ def _get_model(env: dict[str, str]):
             base_url=env["AI_GATEWAY_BASE_URL"],
             temperature=0,
             timeout=300,
-            default_headers={
-                "X-Gateway-Quota-Bypass": "true",
-            },
         )
     else:
         logger.log("Model already initialized, reusing")

@@ -29,7 +29,6 @@ def init_llm(context_env):
         temperature=0,
         timeout=300,
         stream=True,
-        extra_headers={"X-Gateway-Quota-Bypass": "true"},
     )
     return _llm
 
