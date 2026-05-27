@@ -22,7 +22,7 @@ export function useQuizSSE(onEvent: (ev: QuizEvent) => void) {
         headers: {
           "Content-Type": "application/json",
           Accept: "text/event-stream",
-          "pages-agent-conversation-id": conversationIdRef.current,
+          "makers-conversation-id": conversationIdRef.current,
         },
         body: JSON.stringify(body),
         signal: controller.signal,
@@ -104,7 +104,7 @@ export function useQuizSSE(onEvent: (ev: QuizEvent) => void) {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "pages-agent-conversation-id": id,
+          "makers-conversation-id": id,
         },
         body: JSON.stringify({ action: "resume" }),
       });

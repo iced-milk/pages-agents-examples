@@ -8,7 +8,7 @@
  * - isStreaming       : whether the stream is active
  *
  * ConversationId is managed here: generated once per session, sent via
- * `pages-agent-conversation-id` header so EdgeOne routes to the same agent instance.
+ * `makers-conversation-id` header so EdgeOne routes to the same agent instance.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -520,7 +520,7 @@ export function useAgentStream() {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "pages-agent-conversation-id": conversationIdRef.current,
+            "makers-conversation-id": conversationIdRef.current,
           },
           body: JSON.stringify({ message: text }),
           signal: controller.signal,
@@ -683,7 +683,7 @@ export function useAgentStream() {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "pages-agent-conversation-id": convId,
+        "makers-conversation-id": convId,
       },
       body: JSON.stringify({ conversationId: convId }),
     }).catch(() => {
@@ -733,7 +733,7 @@ export function useAgentStream() {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "pages-agent-conversation-id": targetConversationId,
+            "makers-conversation-id": targetConversationId,
           },
           body: JSON.stringify({ action: "history", conversationId: targetConversationId }),
         });

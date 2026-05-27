@@ -18,7 +18,7 @@ def init_models(env: dict[str, str]):
     global _question_model_cache, _hint_model_cache
     if _question_model_cache is None:
         base = init_chat_model(
-            model="@Pages/hy3-preview",
+            model="@makers/hy3-preview",
             api_key=env["AI_GATEWAY_API_KEY"],
             base_url=env["AI_GATEWAY_BASE_URL"],
             model_provider="openai",
@@ -29,7 +29,7 @@ def init_models(env: dict[str, str]):
         )
     if _hint_model_cache is None:
         _hint_model_cache = init_chat_model(
-            model="@Pages/hy3-preview",
+            model="@makers/hy3-preview",
             api_key=env["AI_GATEWAY_API_KEY"],
             base_url=env["AI_GATEWAY_BASE_URL"],
             model_provider="openai",

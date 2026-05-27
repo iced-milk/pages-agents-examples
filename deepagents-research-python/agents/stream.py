@@ -78,7 +78,7 @@ def _get_model(env: dict[str, str]):
     if _model is None:
         logger.log("Initializing model...")
         _model = init_chat_model(
-            model="@Pages/hy3-preview",
+            model="@makers/hy3-preview",
             model_provider="openai",
             api_key=env["AI_GATEWAY_API_KEY"],
             base_url=env["AI_GATEWAY_BASE_URL"],

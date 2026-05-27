@@ -23,7 +23,7 @@ let _hintModelCache: ChatOpenAI | null = null;
 
 function buildModel(env: Env, extra?: { temperature?: number; tags?: string[] }) {
   return new ChatOpenAI({
-    model: "@Pages/hy3-preview",
+    model: "@makers/hy3-preview",
     apiKey: env.AI_GATEWAY_API_KEY,
     configuration: {
       baseURL: env.AI_GATEWAY_BASE_URL,

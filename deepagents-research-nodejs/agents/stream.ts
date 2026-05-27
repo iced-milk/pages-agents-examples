@@ -79,7 +79,7 @@ function getEnv(contextEnv: Record<string, string | undefined> | undefined): Env
 async function getModel(env: Env): Promise<Model> {
   if (!model) {
     logger.log('Initializing model...');
-    model = await initChatModel('@Pages/hy3-preview', {
+    model = await initChatModel('@makers/hy3-preview', {
       modelProvider: 'openai',
       apiKey: env.AI_GATEWAY_API_KEY,
       configuration: {
