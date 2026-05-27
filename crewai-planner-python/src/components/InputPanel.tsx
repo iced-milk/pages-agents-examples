@@ -3,11 +3,15 @@ import { t, getLang } from '../i18n';
 import type { HistoryItem } from '../hooks/useSSE';
 
 interface Props {
-  onSubmit: (productName: string) => void;
+  /** True if no messages yet — show product-name CTA + examples. */
+  isFirstTurn: boolean;
+  /** True while a turn is streaming — disable input. */
   isRunning: boolean;
+  onSubmit: (text: string) => void;
   history: HistoryItem[];
   onSelectHistory: (id: string) => void;
   onRemoveHistory: (id: string) => void;
+  onNewChat: () => void;
 }
 
 function formatRelativeTime(timestamp: number): string {
@@ -24,19 +28,36 @@ function formatRelativeTime(timestamp: number): string {
   return new Date(timestamp).toLocaleDateString(zh ? 'zh-CN' : 'en-US');
 }
 
-export function InputPanel({ onSubmit, isRunning, history, onSelectHistory, onRemoveHistory }: Props) {
+/**
+ * Sidebar input panel.
+ * - First turn: prompts the boss to enter a product name (with quick examples).
+ * - Subsequent turns: shows just the history list and a "new chat" button.
+ *   The actual chat input lives at the bottom of the main chat column.
+ */
+export function InputPanel({
+  isFirstTurn,
+  isRunning,
+  onSubmit,
+  history,
+  onSelectHistory,
+  onRemoveHistory,
+  onNewChat,
+}: Props) {
   const [value, setValue] = useState('');
 
   const examples = [t('example.1'), t('example.2'), t('example.3')];
 
   const handleSubmit = () => {
     const name = value.trim();
-    if (name) onSubmit(name);
+    if (name && !isRunning) {
+      onSubmit(name);
+      setValue('');
+    }
   };
 
   return (
     <div className="flex flex-col h-full" style={{ gap: 20 }}>
-      {/* ─── Input Section ─── */}
+      {/* ─── Product-name input ─── */}
       <div className="flex flex-col" style={{ gap: 10 }}>
         <label
           style={{
@@ -53,7 +74,7 @@ export function InputPanel({ onSubmit, isRunning, history, onSelectHistory, onRe
         <input
           type="text"
           value={value}
-          onChange={(e) => setValue(e.target.value)}
+          onChange={(e) => !isRunning && setValue(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && !isRunning && handleSubmit()}
           placeholder={t('input.placeholder')}
           disabled={isRunning}
@@ -67,7 +88,6 @@ export function InputPanel({ onSubmit, isRunning, history, onSelectHistory, onRe
             fontSize: 13,
             fontFamily: 'inherit',
             outline: 'none',
-            transition: 'var(--transition)',
             opacity: isRunning ? 0.5 : 1,
           }}
         />
@@ -88,7 +108,6 @@ export function InputPanel({ onSubmit, isRunning, history, onSelectHistory, onRe
             fontSize: 13,
             fontWeight: 600,
             fontFamily: 'inherit',
-            transition: 'var(--transition)',
             opacity: isRunning || !value.trim() ? 0.55 : 1,
             cursor: isRunning || !value.trim() ? 'not-allowed' : 'pointer',
             display: 'flex',
@@ -117,7 +136,7 @@ export function InputPanel({ onSubmit, isRunning, history, onSelectHistory, onRe
         </button>
       </div>
 
-      {/* ─── Quick Examples ─── */}
+      {/* Quick examples */}
       <div className="flex flex-col" style={{ gap: 10 }}>
         <span
           style={{
@@ -134,7 +153,7 @@ export function InputPanel({ onSubmit, isRunning, history, onSelectHistory, onRe
           {examples.map((ex) => (
             <button
               key={ex}
-              onClick={() => setValue(ex)}
+              onClick={() => !isRunning && setValue(ex)}
               disabled={isRunning}
               className="cursor-pointer"
               style={{
@@ -145,20 +164,7 @@ export function InputPanel({ onSubmit, isRunning, history, onSelectHistory, onRe
                 color: 'var(--text-secondary)',
                 fontSize: 12,
                 fontFamily: 'inherit',
-                transition: 'var(--transition-fast)',
                 opacity: isRunning ? 0.4 : 1,
-              }}
-              onMouseEnter={(e) => {
-                if (!isRunning) {
-                  e.currentTarget.style.borderColor = 'var(--accent-blue)';
-                  e.currentTarget.style.color = 'var(--accent-blue)';
-                  e.currentTarget.style.background = 'rgba(91, 147, 245, 0.06)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = 'var(--border)';
-                e.currentTarget.style.color = 'var(--text-secondary)';
-                e.currentTarget.style.background = 'transparent';
               }}
             >
               {ex}
@@ -191,18 +197,7 @@ export function InputPanel({ onSubmit, isRunning, history, onSelectHistory, onRe
                   borderRadius: 8,
                   border: '1px solid var(--border-light)',
                   background: 'var(--bg-tertiary)',
-                  transition: 'var(--transition-fast)',
                   gap: 8,
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = 'var(--accent-blue)';
-                  const del = e.currentTarget.querySelector('[data-delete]') as HTMLElement;
-                  if (del) del.style.opacity = '1';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = 'var(--border-light)';
-                  const del = e.currentTarget.querySelector('[data-delete]') as HTMLElement;
-                  if (del) del.style.opacity = '0';
                 }}
               >
                 <button
@@ -228,7 +223,6 @@ export function InputPanel({ onSubmit, isRunning, history, onSelectHistory, onRe
                   </div>
                 </button>
                 <button
-                  data-delete
                   onClick={(e) => { e.stopPropagation(); onRemoveHistory(item.id); }}
                   className="cursor-pointer"
                   style={{
@@ -238,16 +232,8 @@ export function InputPanel({ onSubmit, isRunning, history, onSelectHistory, onRe
                     fontSize: 11,
                     color: 'var(--text-muted)',
                     cursor: 'pointer',
-                    opacity: 0,
-                    transition: 'var(--transition-fast)',
                     fontFamily: 'inherit',
                     borderRadius: 4,
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.color = 'var(--accent-red)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.color = 'var(--text-muted)';
                   }}
                   title={t('history.delete')}
                 >
@@ -258,38 +244,7 @@ export function InputPanel({ onSubmit, isRunning, history, onSelectHistory, onRe
           </div>
         </div>
       )}
-
-      {/* ─── Concepts (anchored to bottom) ─── */}
-      <div
-        style={{
-          marginTop: 'auto',
-          padding: 14,
-          borderRadius: 'var(--radius-sm)',
-          border: '1px solid var(--border-light)',
-          background: 'var(--bg-elevated)',
-        }}
-      >
-        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 10 }}>
-          {t('input.concepts')}
-        </div>
-        <div className="flex flex-col" style={{ gap: 6 }}>
-          {['concept.flow', 'concept.crew', 'concept.agent', 'concept.task'].map((key) => (
-            <div key={key} className="flex items-center" style={{ gap: 8, fontSize: 11, color: 'var(--text-secondary)' }}>
-              <span
-                style={{
-                  width: 4,
-                  height: 4,
-                  borderRadius: '50%',
-                  background: 'var(--accent-blue)',
-                  flexShrink: 0,
-                  opacity: 0.8,
-                }}
-              />
-              {t(key)}
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }
+

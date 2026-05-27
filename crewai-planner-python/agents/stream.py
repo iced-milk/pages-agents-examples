@@ -1,221 +1,207 @@
+"""EdgeOne Pages handler — POST /stream.
+
+Single endpoint, same conversation_id, action="send" for all turns.
+First turn: kickoff (streams). Later turns: resume (non-streaming for now).
 """
-CrewAI Product Planner — EdgeOne Pages handler (Python).
 
-Flow: plan → collaborate (PM + Tech Lead) → review (VP)
-Uses stream=True + kickoff_async() for native async SSE streaming.
-"""
+import asyncio
 
-from pydantic import BaseModel
-from crewai.flow import Flow, listen, start
-from crewai.types.streaming import StreamChunkType
+from crewai.flow.async_feedback.types import HumanFeedbackPending
+from crewai.types.streaming import FlowStreamingOutput, StreamChunkType
+from crewai.utilities.streaming import (
+    create_async_chunk_generator,
+    create_streaming_state,
+    register_cleanup,
+    signal_end,
+    signal_error,
+)
 
-from ._llm_singleton import init_llm, get_llm
-from ._crews.product_crew.product_crew import ProductCrew
-from ._crews.review_crew.review_crew import ReviewCrew
-from ._logger import create_logger
+from ._lib.flow import TurnFlow, bind_collapse_llm
+from ._lib.llm import init_llm
+from ._lib.logger import create_logger
+from ._lib.persistence import get_persistence, has_pending
 
 logger = create_logger("stream")
 
 
-# ─── Flow State ───
+async def _stream_resume(flow, feedback: str) -> FlowStreamingOutput:
+    """Wrap resume_async in the same streaming infrastructure as kickoff_async.
 
-class ProductPlanState(BaseModel):
-    product_name: str = ""
-    product_brief: str = ""
-    collaboration_result: str = ""
-    review_result: str = ""
-    locale: str = "English"
-
-
-# ─── Flow Definition ───
-
-class ProductPlanFlow(Flow[ProductPlanState]):
+    CrewAI's resume_async() doesn't return a streaming iterator, but the
+    underlying Crew still emits LLMStreamChunkEvent to the event bus.
+    This helper subscribes to those events — same pattern as kickoff_async
+    (flow.py:2151-2193).
     """
-    Product planning Flow:
-    1. plan()        — Expand product name into a structured brief (direct LLM call)
-    2. collaborate() — Crew1: PM writes PRD → Tech Lead evaluates
-    3. review()      — Crew2: VP gives final Go/No-Go decision
-    """
+    result_holder: list = []
+    task_info = {"index": 0, "name": "", "id": "", "agent_role": "", "agent_id": ""}
+    state = create_streaming_state(task_info, result_holder, use_async=True)
+    output_holder: list = []
 
-    stream = True  # Enable streaming output
+    async def run():
+        try:
+            result = await flow.resume_async(feedback)
+            result_holder.append(result)
+        except Exception as e:
+            if isinstance(e, HumanFeedbackPending):
+                result_holder.append(e)
+            else:
+                signal_error(state, e, is_async=True)
+        finally:
+            signal_end(state, is_async=True)
 
-    @start()
-    def plan(self):
-        """Expand product name into a brief description for context."""
-        logger.log(f"plan: {self.state.product_name}")
-        llm = get_llm()
-        self.state.product_brief = llm.call(
-            f"Based on the product name '{self.state.product_name}', "
-            f"write a brief product description in 2-3 sentences covering: "
-            f"what the product does, who it's for, and its core value proposition. "
-            f"Output the description only, no titles or prefixes. "
-            f"You MUST respond in {self.state.locale}."
-        )
-        logger.log(f"product_brief: {self.state.product_brief[:100]}...")
+    streaming = FlowStreamingOutput(
+        async_iterator=create_async_chunk_generator(state, run, output_holder)
+    )
+    register_cleanup(streaming, state)
+    output_holder.append(streaming)
+    return streaming
 
-    @listen(plan)
-    def collaborate(self):
-        """Crew1: PM + Tech Lead collaborate on the product."""
-        logger.log("collaborate start")
-        result = (
-            ProductCrew()
-            .crew()
-            .kickoff(inputs={
-                "product_name": self.state.product_name,
-                "product_brief": self.state.product_brief,
-                "locale": self.state.locale,
-            })
-        )
-        self.state.collaboration_result = result.raw
-        logger.log("collaborate done")
-
-    @listen(collaborate)
-    def review(self):
-        """Crew2: VP reviews the team's work."""
-        logger.log("review start")
-        result = (
-            ReviewCrew()
-            .crew()
-            .kickoff(inputs={
-                "product_name": self.state.product_name,
-                "collaboration_result": self.state.collaboration_result,
-                "locale": self.state.locale,
-            })
-        )
-        self.state.review_result = result.raw
-        logger.log("review done")
-
-
-# ─── EdgeOne Pages Handler ───
 
 async def handler(context):
-    """POST /stream — Handle plan/history actions."""
+    """POST /stream — all turns go through here."""
     conversation_id = getattr(context, "conversation_id", None)
     logger.log("conversationId:", conversation_id,
                "runId:", getattr(context, "run_id", None))
 
     body = context.request.body or {}
-    action = body.get("action", "plan")
+    action = body.get("action", "send")
 
-    # ── action: history — restore messages from context.store ──
+    # ── action: history — view-only on refresh ──
     if action == "history":
         cid = body.get("conversationId")
-        logger.log("history request for conversationId:", cid)
         if not cid:
             return {"status_code": 200, "body": {"messages": []}}
         try:
             messages = await context.store.get_messages(cid, limit=100, order="asc")
-            items = [{
-                "role": m.role,
-                "content": m.content,
-                "metadata": m.metadata,
-            } for m in messages]
-            logger.log("history: found", len(items), "messages")
+            items = [{"role": m.role, "content": m.content, "metadata": m.metadata} for m in messages]
             return {"status_code": 200, "body": {"messages": items}}
         except Exception as e:
             logger.error("history error:", str(e))
             return {"status_code": 200, "body": {"messages": []}}
 
-    # ── action: plan (default) — Start the product planning Flow ──
-    product_name = body.get("product_name")
+    # ── action: send — conversation turn ──
+    user_message = (body.get("user_message") or body.get("product_name") or "").strip()
     locale = body.get("locale", "English")
-    logger.log("product_name:", product_name, "locale:", locale)
+    if not user_message:
+        return {"status_code": 400, "body": "Missing user_message"}
 
-    if not product_name:
-        logger.error("Missing product_name")
-        return {"status_code": 400, "body": "Missing product_name"}
-
-    # Initialize LLM singleton (first request reads from context.env)
     try:
         init_llm(context.env)
+        bind_collapse_llm()
     except Exception as e:
-        msg = str(e)
-        logger.error(msg)
-        return {"status_code": 500, "body": {"error": msg}}
+        logger.error(str(e))
+        return {"status_code": 500, "body": {"error": str(e)}}
 
-    memory = context.store
+    store = context.store
     cid = conversation_id
+    persistence = get_persistence()
+
+    is_resume = has_pending(cid)
+    logger.log(f"turn={'resume' if is_resume else 'kickoff'} cid={cid}")
 
     async def gen():
-        streaming = None
-        current_content = ""
+        pending_writes: list[asyncio.Task] = []
+
+        def fire_save(role: str, content: str, metadata: dict | None = None):
+            async def _save():
+                try:
+                    await store.append_message(cid, role, content, metadata=metadata or {})
+                except Exception as e:
+                    logger.error("store write failed:", str(e))
+            pending_writes.append(asyncio.create_task(_save()))
 
         try:
-            # Save user input to memory
-            try:
-                await memory.append_message(cid, "user", product_name)
-            except Exception as e:
-                logger.error("memory save user error:", str(e))
+            # Save user message to store.
+            fire_save("user", user_message)
 
-            flow = ProductPlanFlow()
-            flow.state.product_name = product_name
-            flow.state.locale = locale
+            yield context.utils.sse({"type": "flow_start"})
 
-            yield context.utils.sse({
-                "type": "flow_start",
-                "product_name": product_name,
-            })
+            if is_resume:
+                # ── Later turns: resume paused Flow (streaming) ──
+                # Load pending info BEFORE from_pending (which may clear it)
+                pending = persistence.load_pending_feedback(cid)
+                pending_state = pending[0] if pending else {}
 
-            # Use kickoff_async() for native async streaming
-            streaming = await flow.kickoff_async()
+                flow = TurnFlow.from_pending(cid, persistence=persistence)
+
+                # Determine current phase from state
+                if pending_state.get("latest_prd"):
+                    yield context.utils.sse({"type": "phase", "phase": "iterate"})
+                elif pending_state.get("_pm_ready") or pending_state.get("rounds", 0) >= 3:
+                    yield context.utils.sse({"type": "phase", "phase": "draft"})
+                else:
+                    yield context.utils.sse({"type": "phase", "phase": "discover"})
+
+                # Append user reply to qa_history (for gather phase context).
+                if flow.state.rounds <= 3 and not flow.state.latest_prd:
+                    flow.state.qa_history = (
+                        flow.state.qa_history + f"\nBoss: {user_message}"
+                    ).strip()
+
+                streaming = await _stream_resume(flow, user_message)
+            else:
+                # ── First turn: kickoff new Flow (streaming) ──
+                flow = TurnFlow(persistence=persistence)
+                yield context.utils.sse({"type": "phase", "phase": "discover"})
+                streaming = await flow.kickoff_async(inputs={
+                    "id": cid,
+                    "product_name": user_message,
+                    "locale": locale,
+                })
+
+            # ── Shared streaming loop ──
             prev_agent = ""
+            current_content = ""
+            agent_contents: list[str] = []  # each agent's content in order
+            HIDDEN_AGENT = "Product Reviewer"
 
             async for chunk in streaming:
                 agent_role = (chunk.agent_role or "").strip()
 
-                # Detect agent switch
                 if agent_role and agent_role != prev_agent:
-                    # Save previous agent's content to memory
                     if prev_agent and current_content:
-                        try:
-                            await memory.append_message(
-                                cid, "assistant", current_content,
-                                metadata={"agent": prev_agent},
-                            )
-                        except Exception as e:
-                            logger.error("memory save agent error:", str(e))
+                        fire_save("assistant", current_content, {"agent": prev_agent})
+                        agent_contents.append(current_content)
                         current_content = ""
-
-                    if prev_agent:
+                    if prev_agent and prev_agent != HIDDEN_AGENT:
                         yield context.utils.sse({"type": "agent_end", "agent": prev_agent})
-                    yield context.utils.sse({
-                        "type": "agent_start",
-                        "agent": agent_role,
-                        "task": chunk.task_name,
-                    })
+
+                    if agent_role != HIDDEN_AGENT:
+                        yield context.utils.sse({"type": "agent_start", "agent": agent_role})
                     prev_agent = agent_role
 
-                # Handle different chunk types
                 if chunk.chunk_type == StreamChunkType.TEXT:
-                    current_content += chunk.content or ""
-                    yield context.utils.sse({
-                        "type": "chunk",
-                        "agent": agent_role,
-                        "task_name": chunk.task_name,
-                        "task_index": chunk.task_index,
-                        "content": chunk.content,
-                    })
-                elif chunk.chunk_type == StreamChunkType.TOOL_CALL and chunk.tool_call:
-                    yield context.utils.sse({
-                        "type": "tool_call",
-                        "agent": agent_role,
-                        "tool_name": chunk.tool_call.tool_name,
-                        "arguments": chunk.tool_call.arguments,
-                    })
+                    text = chunk.content or ""
+                    current_content += text
+                    if agent_role != HIDDEN_AGENT:
+                        yield context.utils.sse({
+                            "type": "chunk",
+                            "agent": agent_role,
+                            "content": text,
+                        })
 
-            # Save last agent's content to memory
             if prev_agent and current_content:
-                try:
-                    await memory.append_message(
-                        cid, "assistant", current_content,
-                        metadata={"agent": prev_agent},
-                    )
-                except Exception as e:
-                    logger.error("memory save agent error:", str(e))
-
-            # Send final agent_end
-            if prev_agent:
+                fire_save("assistant", current_content, {"agent": prev_agent})
+                agent_contents.append(current_content)
+            if prev_agent and prev_agent != HIDDEN_AGENT:
                 yield context.utils.sse({"type": "agent_end", "agent": prev_agent})
+
+            # ── Parse options: try from last agent backward ──
+            # Skip options if this was a finalize request.
+            is_finalize = any(k in user_message for k in ("确认完成", "finalize", "looks good"))
+            if not is_finalize:
+                options = None
+                for content in reversed(agent_contents):
+                    options = _parse_options(content)
+                    if options:
+                        break
+                if options:
+                    options["canFinish"] = bool(flow.state.latest_prd)
+                    yield context.utils.sse({"type": "options", **options})
+
+            # Wait for writes.
+            if pending_writes:
+                await asyncio.gather(*pending_writes, return_exceptions=True)
 
             yield context.utils.sse({"type": "done", "status": "completed"})
 
@@ -223,11 +209,23 @@ async def handler(context):
             logger.error("stream error:", str(e))
             yield context.utils.sse({"type": "error", "message": str(e)})
             yield context.utils.sse({"type": "done", "status": "error"})
-        finally:
-            if streaming and not streaming.is_completed:
-                try:
-                    await streaming.aclose()
-                except Exception:
-                    pass
+            if pending_writes:
+                await asyncio.gather(*pending_writes, return_exceptions=True)
 
     return context.utils.stream_sse(gen())
+
+
+def _parse_options(text: str) -> dict | None:
+    """Parse A/B/C/D options from agent output. Returns structured data or None."""
+    import re
+    lines = text.strip().split("\n")
+    choices = []
+
+    for line in lines:
+        match = re.match(r'^([A-D])\.\s*(.+)', line.strip())
+        if match:
+            choices.append({"key": match.group(1), "text": match.group(2).strip()})
+
+    if len(choices) >= 2:
+        return {"choices": choices}
+    return None

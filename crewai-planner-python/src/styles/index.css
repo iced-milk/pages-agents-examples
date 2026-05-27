@@ -27,9 +27,6 @@
   --agent-dev: #38bdf8;
   --agent-dev-bg: rgba(56, 189, 248, 0.10);
   --agent-dev-border: rgba(56, 189, 248, 0.22);
-  --agent-boss: #fbbf24;
-  --agent-boss-bg: rgba(251, 191, 36, 0.10);
-  --agent-boss-border: rgba(251, 191, 36, 0.22);
 
   /* Borders — slightly more visible */
   --border: #2a2b40;
@@ -37,11 +34,7 @@
   --border-focus: rgba(99, 150, 245, 0.45);
 
   /* System */
-  --radius: 12px;
   --radius-sm: 8px;
-  --radius-xs: 6px;
-  --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* ========== Base ========== */
@@ -93,6 +86,11 @@ body {
 @keyframes blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.25; }
+}
+
+@keyframes dot-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-4px); opacity: 1; }
 }
 
 /* Entrance: fade + slide up */

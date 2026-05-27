@@ -3,63 +3,95 @@ import { useSSE, getHistory, removeHistory as removeHistoryItem } from './hooks/
 import type { HistoryItem } from './hooks/useSSE';
 import { InputPanel } from './components/InputPanel';
 import { FlowTimeline } from './components/FlowTimeline';
-import { ChatMessage } from './components/ChatMessage';
+import { ChatMessage, OptionsCard, UserMessage } from './components/ChatMessage';
 import { RoleDivider } from './components/RoleDivider';
 import { SystemMessage } from './components/SystemMessage';
-import type { AgentTimelineNode, ChatItem, FlowStatus } from './types';
-import { AGENT_CONFIG } from './types';
+import type { ChatItem, FlowStatus, Phase, PhaseNode } from './types';
 import { t, getLocaleName, toggleLang, onLangChange } from './i18n';
 
-// --- State ---
+// --- Phase nodes (the timeline) ---
+
+const INITIAL_PHASES: PhaseNode[] = [
+  { phase: 'discover', status: 'pending' },
+  { phase: 'draft', status: 'pending' },
+  { phase: 'iterate', status: 'pending' },
+];
+
+function phasesFor(current: Phase | null, completed: Set<Phase>): PhaseNode[] {
+  return INITIAL_PHASES.map((p) => ({
+    ...p,
+    status: completed.has(p.phase)
+      ? 'completed'
+      : current === p.phase
+        ? 'running'
+        : 'pending',
+  }));
+}
+
+// --- App state ---
+
 interface AppState {
   flowStatus: FlowStatus;
   messages: ChatItem[];
-  timeline: AgentTimelineNode[];
-  totalStartTime: number | null;
+  currentPhase: Phase | null;
+  completedPhases: Set<Phase>;
+  isHistoryView: boolean;
 }
-
-const INITIAL_TIMELINE: AgentTimelineNode[] = Object.keys(AGENT_CONFIG).map((role) => ({
-  role,
-  status: 'pending' as const,
-}));
 
 const INITIAL_STATE: AppState = {
   flowStatus: 'idle',
   messages: [],
-  timeline: INITIAL_TIMELINE,
-  totalStartTime: null,
+  currentPhase: null,
+  completedPhases: new Set(),
+  isHistoryView: false,
 };
 
 // --- Reducer ---
+
 type Action =
   | { type: 'RESET' }
-  | { type: 'FLOW_START' }
+  | { type: 'USER_MESSAGE'; content: string }
+  | { type: 'TURN_START' }
+  | { type: 'PHASE'; phase: Phase }
   | { type: 'AGENT_START'; agent: string }
   | { type: 'CHUNK'; agent: string; content: string }
   | { type: 'AGENT_END'; agent: string }
+  | { type: 'OPTIONS'; choices: { key: string; text: string }[]; canFinish?: boolean }
+  | { type: 'SELECT_OPTION'; key: string }
   | { type: 'DONE' }
   | { type: 'ERROR'; message: string }
-  | { type: 'RESTORE'; messages: ChatItem[]; timeline: AgentTimelineNode[] };
+  | { type: 'RESTORE'; messages: ChatItem[]; phase: Phase | null; completed: Set<Phase> };
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case 'RESET':
-      return { ...INITIAL_STATE, timeline: INITIAL_TIMELINE.map((n) => ({ ...n, status: 'pending' })) };
+      return { ...INITIAL_STATE, completedPhases: new Set(), isHistoryView: false };
 
-    case 'FLOW_START':
-      return { ...state, flowStatus: 'running', totalStartTime: Date.now() };
-
-    case 'AGENT_START': {
-      const now = Date.now();
+    case 'USER_MESSAGE':
       return {
         ...state,
-        timeline: state.timeline.map((n) =>
-          n.role === action.agent ? { ...n, status: 'running' } : n,
-        ),
+        messages: [...state.messages, { type: 'user', content: action.content }],
+      };
+
+    case 'TURN_START':
+      return { ...state, flowStatus: 'running' };
+
+    case 'PHASE': {
+      // Mark previous phase completed when switching to a different one.
+      const completed = new Set(state.completedPhases);
+      if (state.currentPhase && state.currentPhase !== action.phase) {
+        completed.add(state.currentPhase);
+      }
+      return { ...state, currentPhase: action.phase, completedPhases: completed };
+    }
+
+    case 'AGENT_START': {
+      return {
+        ...state,
         messages: [
           ...state.messages,
           { type: 'divider' as const, agent: action.agent },
-          { type: 'message' as const, agent: action.agent, status: 'running', content: '', startTime: now },
+          { type: 'message' as const, agent: action.agent, status: 'running', content: '' },
         ],
       };
     }
@@ -77,34 +109,56 @@ function reducer(state: AppState, action: Action): AppState {
     }
 
     case 'AGENT_END': {
-      const now = Date.now();
-      return {
-        ...state,
-        timeline: state.timeline.map((n) =>
-          n.role === action.agent ? { ...n, status: 'completed' } : n,
-        ),
-        messages: state.messages.map((m) => {
-          if (m.type === 'message' && m.agent === action.agent && m.status === 'running') {
-            const elapsed = `${Math.round((now - m.startTime) / 1000)}s`;
-            return { ...m, status: 'completed' as const, elapsed };
-          }
-          return m;
-        }),
-      };
+      const msgs = [...state.messages];
+
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        const m = msgs[i];
+        if (m.type === 'message' && m.agent === action.agent && m.status === 'running') {
+          // Strip markers for display
+          let displayContent = m.content
+            .replace(/\[READY\]/g, '')
+            .replace(/\[PRD_UPDATED\]/g, '')
+            .replace(/\[SPEC_UPDATED\]/g, '')
+            .trim();
+
+          msgs[i] = { ...m, status: 'completed' as const, content: displayContent };
+          break;
+        }
+      }
+      return { ...state, messages: msgs };
     }
 
     case 'DONE': {
-      const totalElapsed = state.totalStartTime
-        ? `${Math.round((Date.now() - state.totalStartTime) / 1000)}s`
-        : '';
+      // If there are pending options, flow is waiting for user — show as idle not completed
+      const hasPendingOptions = state.messages.some(
+        (m) => m.type === 'options' && !m.selected
+      );
+      if (hasPendingOptions) {
+        return { ...state, flowStatus: 'idle' };
+      }
+      // Mark current phase as completed when flow truly ends
+      const allCompleted = new Set(state.completedPhases);
+      if (state.currentPhase) {
+        allCompleted.add(state.currentPhase);
+      }
+      return { ...state, flowStatus: 'completed', completedPhases: allCompleted, currentPhase: null };
+    }
+
+    case 'OPTIONS':
       return {
         ...state,
-        flowStatus: 'completed',
-        messages: [
-          ...state.messages,
-          { type: 'system' as const, text: `${t('msg.done')} · ${totalElapsed}` },
-        ],
+        messages: [...state.messages, { type: 'options' as const, choices: action.choices, canFinish: action.canFinish }],
       };
+
+    case 'SELECT_OPTION': {
+      const msgs = [...state.messages];
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].type === 'options' && !(msgs[i] as any).selected) {
+          msgs[i] = { ...msgs[i], selected: action.key } as any;
+          break;
+        }
+      }
+      return { ...state, messages: msgs };
     }
 
     case 'ERROR':
@@ -122,8 +176,9 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         flowStatus: 'completed',
         messages: action.messages,
-        timeline: action.timeline,
-        totalStartTime: null,
+        currentPhase: action.phase,
+        completedPhases: action.completed,
+        isHistoryView: true,
       };
 
     default:
@@ -132,12 +187,12 @@ function reducer(state: AppState, action: Action): AppState {
 }
 
 // --- App ---
+
 export default function App() {
   const [state, dispatch] = useReducer(reducer, INITIAL_STATE);
-  const { events, start, loadHistory } = useSSE();
+  const { events, send, loadHistory, resetConversation } = useSSE();
   const processedRef = useRef(0);
 
-  // History state
   const [history, setHistory] = useState<HistoryItem[]>(getHistory);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
@@ -179,7 +234,10 @@ export default function App() {
     for (const event of newEvents) {
       switch (event.type) {
         case 'flow_start':
-          dispatch({ type: 'FLOW_START' });
+          dispatch({ type: 'TURN_START' });
+          break;
+        case 'phase':
+          if (event.phase) dispatch({ type: 'PHASE', phase: event.phase });
           break;
         case 'agent_start':
           if (event.agent) dispatch({ type: 'AGENT_START', agent: event.agent });
@@ -189,6 +247,9 @@ export default function App() {
           break;
         case 'agent_end':
           if (event.agent) dispatch({ type: 'AGENT_END', agent: event.agent });
+          break;
+        case 'options':
+          if (event.choices) dispatch({ type: 'OPTIONS', choices: event.choices, canFinish: event.canFinish });
           break;
         case 'done':
           dispatch({ type: 'DONE' });
@@ -200,43 +261,93 @@ export default function App() {
     }
   }, [events]);
 
-  const handleSubmit = (productName: string) => {
-    dispatch({ type: 'RESET' });
-    dispatch({ type: 'FLOW_START' });  // Immediately show loading state
+  const isFirstTurn = state.messages.length === 0;
+
+  const handleSubmit = useCallback((text: string) => {
+    // If previous conversation ended, reset before starting new one
+    if (!isFirstTurn) {
+      dispatch({ type: 'RESET' });
+      resetConversation();
+      processedRef.current = 0;
+    }
+    dispatch({ type: 'USER_MESSAGE', content: text });
+    dispatch({ type: 'TURN_START' });
     isNearBottomRef.current = true;
-    start(productName, getLocaleName());
-    // Refresh history after starting (localStorage was updated in useSSE.start)
+    send(text, getLocaleName(), { isFirstTurn: true });
     setTimeout(refreshHistory, 100);
-  };
+  }, [send, isFirstTurn, resetConversation, refreshHistory]);
+
+  const handleNewChat = useCallback(() => {
+    dispatch({ type: 'RESET' });
+    resetConversation();
+    processedRef.current = 0;
+  }, [resetConversation]);
+
+  const handleSelectOption = useCallback((key: string, text: string) => {
+    dispatch({ type: 'SELECT_OPTION', key });
+    dispatch({ type: 'USER_MESSAGE', content: text });
+    dispatch({ type: 'TURN_START' });
+    isNearBottomRef.current = true;
+    send(text, getLocaleName(), { isFirstTurn: false });
+  }, [send]);
+
+  const handleDone = useCallback(() => {
+    const text = t('options.finalize');
+    dispatch({ type: 'SELECT_OPTION', key: 'done' });
+    dispatch({ type: 'USER_MESSAGE', content: text });
+    dispatch({ type: 'TURN_START' });
+    isNearBottomRef.current = true;
+    send(text, getLocaleName(), { isFirstTurn: false });
+  }, [send]);
 
   const handleSelectHistory = useCallback(async (id: string) => {
     setIsLoadingHistory(true);
     dispatch({ type: 'RESET' });
+    processedRef.current = 0;
     const messages = await loadHistory(id);
-    if (messages.length > 0) {
-      // Build UI state directly — no SSE replay, no 0s elapsed times
-      const restoredMessages: ChatItem[] = [];
-      const restoredTimeline: AgentTimelineNode[] = INITIAL_TIMELINE.map((n) => ({ ...n, status: 'pending' }));
 
-      for (const msg of messages) {
-        if (msg.role === 'user') continue;
-        const agent = (msg.metadata?.agent as string) || '';
-        if (!agent) continue;
-        restoredMessages.push({ type: 'divider', agent });
-        restoredMessages.push({
+    const restored: ChatItem[] = [];
+    let lastPhase: Phase | null = null;
+    const completed = new Set<Phase>();
+
+    for (const msg of messages) {
+      const meta = (msg.metadata || {}) as Record<string, unknown>;
+      const agent = meta.agent as string | undefined;
+      const phase = meta.phase as Phase | undefined;
+
+      if (msg.role === 'user') {
+        restored.push({ type: 'user', content: msg.content });
+        continue;
+      }
+
+      // Track phase progression for the timeline
+      if (phase) {
+        if (lastPhase && lastPhase !== phase) completed.add(lastPhase);
+        lastPhase = phase;
+      }
+
+      if (agent) {
+        // Hide Reviewer messages (same as live streaming)
+        if (agent === 'Product Reviewer') continue;
+        restored.push({ type: 'divider', agent });
+        restored.push({
           type: 'message',
           agent,
           status: 'completed',
           content: msg.content,
-          startTime: 0,
         });
-        const tl = restoredTimeline.find((n) => n.role === agent);
-        if (tl) tl.status = 'completed';
       }
-      restoredMessages.push({ type: 'system', text: t('msg.done') });
-
-      dispatch({ type: 'RESTORE', messages: restoredMessages, timeline: restoredTimeline });
     }
+
+    // Promote the last seen phase as the current phase (if not yet completed elsewhere)
+    if (lastPhase) completed.delete(lastPhase);
+
+    dispatch({
+      type: 'RESTORE',
+      messages: restored,
+      phase: lastPhase,
+      completed,
+    });
     setIsLoadingHistory(false);
   }, [loadHistory]);
 
@@ -251,6 +362,8 @@ export default function App() {
     }
   }, [handleSelectHistory]);
 
+  const phaseNodes = phasesFor(state.currentPhase, state.completedPhases);
+
   return (
     <div className="h-screen flex flex-col" style={{ background: 'var(--bg-primary)' }}>
       {/* Top Bar */}
@@ -262,7 +375,6 @@ export default function App() {
           background: 'var(--bg-secondary)',
         }}
       >
-        {/* Left: logo + title + status */}
         <div className="flex items-center gap-3">
           <div
             className="flex items-center justify-center"
@@ -279,7 +391,6 @@ export default function App() {
           <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', letterSpacing: '-0.3px' }}>
             CrewAI Product Planner
           </span>
-          {/* Status indicator */}
           <div className="flex items-center gap-1.5" style={{ marginLeft: 4 }}>
             <div
               style={{
@@ -300,7 +411,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Right: language toggle */}
         <button
           onClick={toggleLang}
           className="cursor-pointer"
@@ -313,15 +423,6 @@ export default function App() {
             fontSize: 11,
             fontWeight: 500,
             fontFamily: 'inherit',
-            transition: 'var(--transition-fast)',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = 'var(--border-light)';
-            e.currentTarget.style.color = 'var(--text-secondary)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = 'var(--border)';
-            e.currentTarget.style.color = 'var(--text-muted)';
           }}
         >
           {t('lang.switch')}
@@ -330,7 +431,7 @@ export default function App() {
 
       {/* Main Layout */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Left Sidebar */}
+        {/* Sidebar */}
         <aside
           className="flex-shrink-0 overflow-y-auto"
           style={{
@@ -341,18 +442,20 @@ export default function App() {
           }}
         >
           <InputPanel
+            isFirstTurn={isFirstTurn}
+            isRunning={!isFirstTurn && state.flowStatus !== 'completed'}
             onSubmit={handleSubmit}
-            isRunning={state.flowStatus === 'running'}
             history={history}
             onSelectHistory={handleSelectHistory}
             onRemoveHistory={handleRemoveHistory}
+            onNewChat={handleNewChat}
           />
         </aside>
 
         {/* Right Content */}
         <main className="flex-1 flex flex-col overflow-hidden" style={{ background: 'var(--bg-primary)' }}>
-          {/* Timeline bar */}
-          {state.flowStatus !== 'idle' && (
+          {/* Phase timeline */}
+          {!isFirstTurn && (
             <div
               className="flex-shrink-0"
               style={{
@@ -360,7 +463,7 @@ export default function App() {
                 background: 'var(--bg-secondary)',
               }}
             >
-              <FlowTimeline agents={state.timeline} />
+              <FlowTimeline phases={phaseNodes} />
             </div>
           )}
 
@@ -371,7 +474,6 @@ export default function App() {
             className="flex-1 overflow-y-auto"
           >
             {isLoadingHistory ? (
-              /* Loading history */
               <div
                 className="h-full flex flex-col items-center justify-center"
                 style={{ padding: '0 24px' }}
@@ -392,13 +494,12 @@ export default function App() {
                   {t('history.loading')}
                 </span>
               </div>
-            ) : state.flowStatus === 'idle' ? (
-              /* Empty State — welcoming & visible */
+            ) : isFirstTurn ? (
+              /* Empty state */
               <div
                 className="h-full flex flex-col items-center justify-center"
                 style={{ padding: '0 24px' }}
               >
-                {/* Glowing icon */}
                 <div
                   className="flex items-center justify-center"
                   style={{
@@ -415,43 +516,62 @@ export default function App() {
                 >
                   🚀
                 </div>
-                <h3 style={{ fontSize: 17, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 10 }}>
+                <h3 style={{ fontSize: 17, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 20 }}>
                   {t('empty.title')}
                 </h3>
-                <p style={{ fontSize: 13, color: 'var(--text-secondary)', maxWidth: 360, textAlign: 'center', lineHeight: 1.7 }}>
-                  {t('empty.desc')}
-                </p>
-
-                {/* Decorative agent preview chips */}
-                <div className="flex items-center gap-3" style={{ marginTop: 32 }}>
-                  {Object.entries(AGENT_CONFIG).map(([role, cfg]) => (
-                    <div
-                      key={role}
-                      className="flex items-center gap-2"
-                      style={{
-                        padding: '6px 14px',
-                        borderRadius: 20,
-                        background: 'var(--bg-tertiary)',
-                        border: '1px solid var(--border)',
-                      }}
-                    >
-                      <span style={{ fontSize: 14 }}>{cfg.avatar}</span>
-                      <span style={{ fontSize: 11, color: 'var(--text-secondary)', fontWeight: 500 }}>
-                        {t(cfg.shortNameKey)}
+                <div className="flex flex-col" style={{ gap: 0, maxWidth: 320 }}>
+                  {['empty.step1', 'empty.step2', 'empty.step3'].map((key, i, arr) => (
+                    <div key={key} className="flex items-stretch" style={{ gap: 12 }}>
+                      {/* Left: number + connector line */}
+                      <div className="flex flex-col items-center" style={{ width: 20 }}>
+                        <span
+                          style={{
+                            width: 20,
+                            height: 20,
+                            borderRadius: '50%',
+                            border: '1.5px solid var(--accent-blue)',
+                            background: 'transparent',
+                            color: 'var(--accent-blue)',
+                            fontSize: 10,
+                            fontWeight: 600,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            flexShrink: 0,
+                          }}
+                        >
+                          {i + 1}
+                        </span>
+                        {i < arr.length - 1 && (
+                          <div style={{ width: 1, flex: 1, background: 'var(--border)', margin: '4px 0' }} />
+                        )}
+                      </div>
+                      {/* Right: text */}
+                      <span style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5, paddingBottom: i < arr.length - 1 ? 14 : 0, paddingTop: 1 }}>
+                        {t(key)}
                       </span>
                     </div>
                   ))}
                 </div>
               </div>
             ) : (
-              /* Message Stream */
+              /* Message stream */
               <div style={{ maxWidth: 760, margin: '0 auto', padding: '20px 28px 32px' }}>
-                {state.flowStatus === 'running' && state.messages.length === 0 && (
-                  <SystemMessage text={t('msg.generating')} />
-                )}
                 {state.messages.map((item, i) => {
+                  if (item.type === 'user') return <UserMessage key={i} content={item.content} />;
                   if (item.type === 'divider') return <RoleDivider key={i} agent={item.agent} />;
                   if (item.type === 'system') return <SystemMessage key={i} text={item.text} />;
+                  if (item.type === 'options') {
+                    return (
+                      <OptionsCard
+                        key={i}
+                        choices={item.choices}
+                        selected={item.selected}
+                        onSelect={handleSelectOption}
+                        onDone={item.canFinish ? handleDone : undefined}
+                      />
+                    );
+                  }
                   if (item.type === 'message') {
                     return (
                       <ChatMessage
@@ -459,17 +579,56 @@ export default function App() {
                         agent={item.agent}
                         status={item.status}
                         content={item.content}
-                        startTime={item.startTime}
-                        elapsed={item.elapsed}
                       />
                     );
                   }
                   return null;
                 })}
+                {/* Loading indicator: shows when running but no agent is streaming and no options waiting */}
+                {state.flowStatus === 'running' && !state.messages.some(
+                  (m) => m.type === 'message' && m.status === 'running'
+                ) && !state.messages.some(
+                  (m) => m.type === 'options' && !m.selected
+                ) && (
+                  <div className="flex items-center" style={{ gap: 4, padding: '14px 0', marginLeft: 50 }}>
+                    {[0, 1, 2].map((i) => (
+                      <span
+                        key={i}
+                        style={{
+                          width: 6,
+                          height: 6,
+                          borderRadius: '50%',
+                          background: 'var(--accent-blue)',
+                          opacity: 0.6,
+                          animation: `dot-bounce 1.2s ${i * 0.2}s infinite ease-in-out`,
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
                 <div ref={messagesEndRef} />
               </div>
             )}
           </div>
+
+          {/* Conversation ended / history hint */}
+          {((state.isHistoryView) || (!isFirstTurn && !state.isHistoryView && state.flowStatus === 'completed' && !state.messages.some(
+            (m) => m.type === 'options' && !m.selected
+          ))) && (
+            <div
+              className="flex items-center justify-center"
+              style={{
+                padding: '10px 24px',
+                borderTop: '1px solid var(--border)',
+                background: 'var(--bg-secondary)',
+                flexShrink: 0,
+              }}
+            >
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                {t('msg.ended')}
+              </span>
+            </div>
+          )}
         </main>
       </div>
     </div>

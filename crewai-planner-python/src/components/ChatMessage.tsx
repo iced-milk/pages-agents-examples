@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 import { AGENT_CONFIG } from '../types';
 import { t } from '../i18n';
 
@@ -8,17 +9,14 @@ interface Props {
   agent: string;
   status: 'running' | 'completed';
   content: string;
-  startTime: number;
-  elapsed?: string;
 }
 
 const AVATAR_STYLES: Record<string, { bg: string; border: string }> = {
   'Senior Product Manager': { bg: 'var(--agent-pm-bg)', border: 'var(--agent-pm-border)' },
   'Senior Tech Lead': { bg: 'var(--agent-dev-bg)', border: 'var(--agent-dev-border)' },
-  'VP of Product': { bg: 'var(--agent-boss-bg)', border: 'var(--agent-boss-border)' },
 };
 
-export function ChatMessage({ agent, status, content, startTime, elapsed }: Props) {
+export function ChatMessage({ agent, status, content }: Props) {
   const config = AGENT_CONFIG[agent] || { avatar: '🤖', color: 'var(--text-muted)', crewTagKey: '', shortNameKey: '' };
   const shortName = config.shortNameKey ? t(config.shortNameKey) : agent;
   const avatarStyle = AVATAR_STYLES[agent] || { bg: 'rgba(91,147,245,0.08)', border: 'rgba(91,147,245,0.18)' };
@@ -34,17 +32,6 @@ export function ChatMessage({ agent, status, content, startTime, elapsed }: Prop
     return () => clearTimeout(timer);
   }, [content, status]);
 
-  // Live elapsed
-  const [liveElapsed, setLiveElapsed] = useState('');
-  useEffect(() => {
-    if (status === 'completed') return;
-    const interval = setInterval(() => {
-      setLiveElapsed(`${Math.round((Date.now() - startTime) / 1000)}s`);
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [status, startTime]);
-
-  const displayElapsed = elapsed || liveElapsed;
   const crewTag = config.crewTagKey ? t(config.crewTagKey) : '';
   const isRunning = status === 'running';
 
@@ -121,17 +108,6 @@ export function ChatMessage({ agent, status, content, startTime, elapsed }: Prop
               {crewTag}
             </span>
           )}
-          <span
-            style={{
-              fontSize: 11,
-              marginLeft: 'auto',
-              color: isRunning ? config.color : 'var(--text-muted)',
-              fontWeight: isRunning ? 500 : 400,
-              fontVariantNumeric: 'tabular-nums',
-            }}
-          >
-            {isRunning ? `● ${displayElapsed}` : displayElapsed}
-          </span>
         </div>
 
         {/* Content bubble */}
@@ -149,7 +125,7 @@ export function ChatMessage({ agent, status, content, startTime, elapsed }: Prop
           {rendered ? (
             <div className={isRunning ? 'cursor-blink' : ''}>
               <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
+                remarkPlugins={[remarkGfm, remarkBreaks]}
                 components={{
                   h1: ({ children }) => <h1 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', margin: '14px 0 6px' }}>{children}</h1>,
                   h2: ({ children }) => <h2 style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', margin: '14px 0 5px' }}>{children}</h2>,
@@ -170,6 +146,14 @@ export function ChatMessage({ agent, status, content, startTime, elapsed }: Prop
                       {children}
                     </code>
                   ),
+                  table: ({ children }) => (
+                    <div style={{ overflowX: 'auto', margin: '8px 0' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>{children}</table>
+                    </div>
+                  ),
+                  thead: ({ children }) => <thead style={{ borderBottom: '1.5px solid var(--border)' }}>{children}</thead>,
+                  th: ({ children }) => <th style={{ padding: '6px 10px', textAlign: 'left', color: 'var(--text-primary)', fontWeight: 600, whiteSpace: 'nowrap' }}>{children}</th>,
+                  td: ({ children }) => <td style={{ padding: '5px 10px', color: 'var(--text-secondary)', borderBottom: '1px solid var(--border-light)' }}>{children}</td>,
                 }}
               >
                 {rendered}
@@ -179,6 +163,300 @@ export function ChatMessage({ agent, status, content, startTime, elapsed }: Prop
             <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{t('msg.thinking')}</span>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ─── Options card (A/B/C buttons + inline input + done) ───
+
+interface OptionsCardProps {
+  choices: { key: string; text: string }[];
+  selected?: string;
+  onSelect: (key: string, text: string) => void;
+  onDone?: () => void;
+}
+
+export function OptionsCard({ choices, selected, onSelect, onDone }: OptionsCardProps) {
+  const [customText, setCustomText] = useState('');
+  const [expanded, setExpanded] = useState(!selected);
+
+  // Auto-collapse after selection
+  useEffect(() => {
+    if (selected) setExpanded(false);
+  }, [selected]);
+
+  const handleCustomSubmit = () => {
+    const v = customText.trim();
+    if (v && !selected) {
+      onSelect('custom', v);
+    }
+  };
+
+  const isDisabled = !!selected;
+
+  // After selection: collapse to show only selected item with expand toggle
+  if (isDisabled && !expanded) {
+    const selectedChoice = selected === 'custom'
+      ? { key: '✏️', text: customText }
+      : selected === 'done'
+        ? { key: '✓', text: t('options.done') }
+        : choices.find((c) => c.key === selected);
+    return (
+      <div style={{ padding: '2px 0 6px', marginLeft: 50 }}>
+        <button
+          onClick={() => setExpanded(true)}
+          className="cursor-pointer flex items-center"
+          style={{
+            gap: 6,
+            padding: '4px 10px',
+            borderRadius: 6,
+            border: '1px solid var(--border-light)',
+            background: 'transparent',
+            color: 'var(--text-muted)',
+            fontSize: 11,
+            fontFamily: 'inherit',
+            fontWeight: 400,
+            cursor: 'pointer',
+            maxWidth: '70%',
+          }}
+        >
+          <span style={{ fontSize: 10, flexShrink: 0 }}>{selectedChoice?.key || '?'}.</span>
+          <span style={{ opacity: 0.7, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selectedChoice?.text || ''}</span>
+          <span style={{ fontSize: 10, flexShrink: 0, opacity: 0.5 }}>▾</span>
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="animate-fade-in-up" style={{ padding: isDisabled ? '4px 0 8px' : '8px 0 12px', marginLeft: 50 }}>
+      <div className="flex flex-col" style={{ gap: isDisabled ? 6 : 8 }}>
+        {/* Collapse toggle after selection */}
+        {isDisabled && (
+          <button
+            onClick={() => setExpanded(false)}
+            className="cursor-pointer"
+            style={{
+              alignSelf: 'flex-end',
+              padding: '2px 8px',
+              borderRadius: 4,
+              border: 'none',
+              background: 'transparent',
+              color: 'var(--text-muted)',
+              fontSize: 10,
+              fontFamily: 'inherit',
+              cursor: 'pointer',
+            }}
+          >
+            {t('doc.collapse')}
+          </button>
+        )}
+
+        {choices.map((c) => {
+          const isSelected = selected === c.key;
+          // After selection: all items use muted styling
+          const muted = isDisabled;
+          return (
+            <button
+              key={c.key}
+              onClick={() => !isDisabled && onSelect(c.key, c.text)}
+              disabled={isDisabled}
+              className="cursor-pointer"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: muted ? '7px 12px' : '10px 14px',
+                borderRadius: 10,
+                border: isSelected && !muted
+                  ? '1.5px solid var(--accent-blue)'
+                  : '1px solid var(--border-light)',
+                background: isSelected && !muted
+                  ? 'rgba(91, 147, 245, 0.08)'
+                  : 'var(--bg-secondary)',
+                color: muted
+                  ? isSelected ? 'var(--text-secondary)' : 'var(--text-muted)'
+                  : isSelected ? 'var(--accent-blue)' : 'var(--text-secondary)',
+                fontSize: muted ? 12 : 13,
+                fontFamily: 'inherit',
+                fontWeight: isSelected ? 500 : 400,
+                textAlign: 'left',
+                cursor: isDisabled ? 'default' : 'pointer',
+                opacity: muted && !isSelected ? 0.4 : muted ? 0.85 : 1,
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <span
+                style={{
+                  width: muted ? 18 : 22,
+                  height: muted ? 18 : 22,
+                  borderRadius: '50%',
+                  border: isSelected && !muted
+                    ? '2px solid var(--accent-blue)'
+                    : '1.5px solid var(--border)',
+                  background: isSelected && !muted ? 'var(--accent-blue)' : 'transparent',
+                  color: isSelected && !muted ? '#fff' : 'var(--text-muted)',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                {c.key}
+              </span>
+              <span>{c.text}</span>
+            </button>
+          );
+        })}
+
+        {/* Inline custom input */}
+        {!isDisabled && (
+          <div
+            className="flex items-center"
+            style={{
+              gap: 8,
+              padding: '6px 14px',
+              borderRadius: 10,
+              border: '1px dashed var(--border-light)',
+              background: 'var(--bg-tertiary)',
+            }}
+          >
+            <span style={{ fontSize: 14, color: 'var(--text-muted)', flexShrink: 0 }}>✏️</span>
+            <input
+              type="text"
+              value={customText}
+              onChange={(e) => setCustomText(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleCustomSubmit()}
+              placeholder={t('options.custom')}
+              style={{
+                flex: 1,
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--text-primary)',
+                fontSize: 13,
+                fontFamily: 'inherit',
+                outline: 'none',
+              }}
+            />
+            {customText.trim() && (
+              <button
+                onClick={handleCustomSubmit}
+                className="cursor-pointer"
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: 6,
+                  border: 'none',
+                  background: 'var(--accent-blue)',
+                  color: '#fff',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  fontFamily: 'inherit',
+                  cursor: 'pointer',
+                }}
+              >
+                {t('chat.send')}
+              </button>
+            )}
+          </div>
+        )}
+        {selected === 'custom' && (
+          <div
+            style={{
+              padding: '5px 12px',
+              borderRadius: 10,
+              border: '1px solid var(--border-light)',
+              background: 'var(--bg-secondary)',
+              fontSize: 12,
+              color: 'var(--text-secondary)',
+              fontWeight: 400,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              opacity: 0.85,
+            }}
+          >
+            <span style={{ fontSize: 12 }}>✏️</span>
+            <span>{customText || '...'}</span>
+          </div>
+        )}
+
+        {/* Done button */}
+        {!isDisabled && onDone && (
+          <button
+            onClick={onDone}
+            className="cursor-pointer"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '9px 14px',
+              borderRadius: 10,
+              border: '1px solid var(--border-light)',
+              background: 'var(--bg-secondary)',
+              color: 'var(--text-muted)',
+              fontSize: 12,
+              fontFamily: 'inherit',
+              cursor: 'pointer',
+              marginTop: 4,
+            }}
+          >
+            <span style={{ fontSize: 13 }}>✓</span>
+            <span>{t('options.done')}</span>
+          </button>
+        )}
+        {/* Done selected (muted) */}
+        {isDisabled && selected === 'done' && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '5px 12px',
+              borderRadius: 10,
+              border: '1px solid var(--border-light)',
+              background: 'var(--bg-secondary)',
+              color: 'var(--text-secondary)',
+              fontSize: 12,
+              opacity: 0.85,
+              marginTop: 4,
+            }}
+          >
+            <span style={{ fontSize: 12 }}>✓</span>
+            <span>{t('options.done')}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── User message bubble (right-aligned) ───
+
+interface UserMsgProps {
+  content: string;
+}
+
+export function UserMessage({ content }: UserMsgProps) {
+  return (
+    <div className="flex animate-fade-in-up" style={{ justifyContent: 'flex-end', padding: '10px 0' }}>
+      <div
+        style={{
+          maxWidth: '78%',
+          padding: '9px 14px',
+          background: 'var(--accent-blue)',
+          color: '#fff',
+          fontSize: 13,
+          lineHeight: 1.6,
+          borderRadius: '12px 12px 2px 12px',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+        }}
+      >
+        {content}
       </div>
     </div>
   );

@@ -1,0 +1,30 @@
+interview:
+  description: >
+    You are the Senior Product Manager interviewing the Boss to gather
+    requirements for product: {product_name}
+
+    Conversation so far:
+    ===
+    {qa_history}
+    ===
+
+    Rules:
+    - If you already have enough information to write a complete PRD
+      (target users, core problem, key features, success metrics are
+      all clear), output ONLY the token [READY] on a single line.
+      Nothing else. Do NOT write the PRD here.
+    - Otherwise, ask exactly ONE focused question with 2-3 concrete
+      options for the Boss to choose from. Format:
+
+      [Your question]
+      A. [Option 1]
+      B. [Option 2]
+      C. [Option 3]
+
+      The options should cover the most common/reasonable choices for
+      this product. Keep each option concise (one short sentence).
+      The Boss can pick one or give a custom answer.
+
+    You MUST respond in {locale}.
+  expected_output: >
+    Either ONE question with 2-3 options (A/B/C format), or just [READY].

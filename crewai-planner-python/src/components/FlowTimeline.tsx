@@ -1,24 +1,28 @@
-import { AGENT_CONFIG } from '../types';
-import type { AgentTimelineNode } from '../types';
+import type { PhaseNode } from '../types';
 import { t } from '../i18n';
 
 interface Props {
-  agents: AgentTimelineNode[];
+  phases: PhaseNode[];
 }
 
-export function FlowTimeline({ agents }: Props) {
+const PHASE_META: Record<string, { icon: string; labelKey: string; color: string }> = {
+  discover: { icon: '📝', labelKey: 'phase.discover', color: 'var(--agent-pm)' },
+  draft: { icon: '📄', labelKey: 'phase.draft', color: 'var(--agent-dev)' },
+  iterate: { icon: '💡', labelKey: 'phase.iterate', color: 'var(--accent-blue)' },
+};
+
+export function FlowTimeline({ phases }: Props) {
   return (
     <div className="flex items-center justify-center" style={{ padding: '14px 24px', gap: 0 }}>
-      {agents.map((node, i) => {
-        const config = AGENT_CONFIG[node.role];
-        const shortName = config?.shortNameKey ? t(config.shortNameKey) : node.role;
-        const isLast = i === agents.length - 1;
+      {phases.map((node, i) => {
+        const meta = PHASE_META[node.phase];
+        const label = t(meta.labelKey);
+        const isLast = i === phases.length - 1;
         const isCompleted = node.status === 'completed';
         const isRunning = node.status === 'running';
 
         return (
-          <div key={node.role} className="flex items-center">
-            {/* Node */}
+          <div key={node.phase} className="flex items-center">
             <div className="flex flex-col items-center" style={{ gap: 5 }}>
               <div
                 className="flex items-center justify-center"
@@ -28,18 +32,18 @@ export function FlowTimeline({ agents }: Props) {
                   borderRadius: '50%',
                   border: `2px solid ${
                     isCompleted ? 'var(--accent-green)'
-                    : isRunning ? (config?.color || 'var(--accent-blue)')
+                    : isRunning ? meta.color
                     : 'var(--border)'
                   }`,
                   background: isCompleted ? 'var(--accent-green)' : 'var(--bg-secondary)',
-                  color: isCompleted ? '#fff' : isRunning ? (config?.color || 'var(--accent-blue)') : 'var(--text-muted)',
-                  fontSize: isCompleted ? 12 : 13,
+                  color: isCompleted ? '#fff' : isRunning ? meta.color : 'var(--text-muted)',
+                  fontSize: isCompleted ? 12 : 14,
                   fontWeight: 700,
                   transition: 'all 0.4s ease',
                   animation: isRunning ? 'pulse-ring 2s infinite' : 'none',
                 }}
               >
-                {isCompleted ? '✓' : config?.avatar || '?'}
+                {isCompleted ? '✓' : meta.icon}
               </div>
               <span
                 style={{
@@ -49,11 +53,10 @@ export function FlowTimeline({ agents }: Props) {
                   transition: 'color 0.3s ease',
                 }}
               >
-                {shortName}
+                {label}
               </span>
             </div>
 
-            {/* Connector */}
             {!isLast && (
               <div
                 style={{
@@ -68,7 +71,6 @@ export function FlowTimeline({ agents }: Props) {
                   overflow: 'hidden',
                 }}
               >
-                {/* Animated flow on active connector */}
                 {isRunning && (
                   <div
                     style={{
@@ -77,7 +79,7 @@ export function FlowTimeline({ agents }: Props) {
                       left: '-100%',
                       width: '100%',
                       height: '100%',
-                      background: `linear-gradient(90deg, transparent, ${config?.color || 'var(--accent-blue)'}, transparent)`,
+                      background: `linear-gradient(90deg, transparent, ${meta.color}, transparent)`,
                       animation: 'connector-flow 1.5s infinite',
                     }}
                   />

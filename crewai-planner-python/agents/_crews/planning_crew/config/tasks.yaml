@@ -1,0 +1,68 @@
+pm_write_prd:
+  description: >
+    You are the Senior Product Manager. Based on the conversation below,
+    write a focused PRD for: {product_name}
+
+    Conversation:
+    ===
+    {qa_history}
+    ===
+
+    {existing_prd}
+
+    {iterate_feedback}
+
+    The PRD must include:
+    - Product overview (3-4 sentences, clearly state the problem and solution)
+    - Target users and their core pain points
+    - 3-5 core features, each with:
+      - User scenario (who does what, when)
+      - Feature description
+      - Acceptance criteria (how to verify it works)
+    - Success metrics (3-4 measurable KPIs with specific target values)
+    - Scope boundaries: what is explicitly NOT included in this version
+
+    Keep it actionable and specific. Use markdown headings.
+    Do NOT include Tech Spec content — that is the Tech Lead's job.
+    You MUST respond in {locale}.
+  expected_output: >
+    A structured PRD document in markdown with detailed feature descriptions.
+
+tl_write_spec:
+  description: >
+    You are the Senior Tech Lead. Based on the PRD above (provided via
+    context), write a focused Tech Spec for: {product_name}
+
+    {existing_spec}
+
+    {iterate_feedback}
+
+    The Tech Spec must include:
+    - High-level architecture (1 short paragraph)
+    - 3-5 key technical components or services
+    - Top 2-3 risks and mitigation
+    - Rough effort estimate (S / M / L per component)
+
+    Keep it actionable. Use markdown headings.
+    You MUST respond in {locale}.
+  expected_output: >
+    A structured Tech Spec document in markdown.
+
+review_suggest:
+  description: >
+    You are the Product Reviewer. Read the PRD and Tech Spec above
+    (provided via context) and suggest 2-3 actionable improvement
+    directions for the Boss to consider.
+
+    Each suggestion should be specific and actionable — e.g. "narrow
+    feature scope to 3 core features", "add competitor analysis",
+    "clarify technical stack choices".
+
+    Output ONLY the suggestions in this exact format (no other text):
+    A. [Suggestion 1]
+    B. [Suggestion 2]
+    C. [Suggestion 3]
+
+    You MUST respond in {locale}.
+  expected_output: >
+    2-3 suggestions in A/B/C format, nothing else.

@@ -1,18 +1,17 @@
-"""LLM singleton — lazy-initialized from context.env on first request."""
+"""LLM singletons — streaming (for Crews) + non-streaming (for @human_feedback collapse)."""
 
 from crewai import LLM
-from ._logger import create_logger
+from .logger import create_logger
 
 logger = create_logger("llm")
 
 _llm = None
+_collapse_llm = None
 
 
 def init_llm(context_env):
-    """Initialize LLM from context.env on first request, reuse afterwards."""
-    global _llm
+    global _llm, _collapse_llm
     if _llm is not None:
-        logger.log("LLM already initialized, reusing")
         return _llm
 
     env = context_env or {}
@@ -23,18 +22,31 @@ def init_llm(context_env):
 
     logger.log("Initializing LLM...")
     _llm = LLM(
-        model="openai/@Pages/hy3-preview",
+        model="openai/@makers/deepseek-v4-flash",
         api_key=api_key,
         base_url=base_url,
         temperature=0,
         timeout=300,
         stream=True,
     )
+    _collapse_llm = LLM(
+        model="openai/deepseek-v4-flash",
+        api_key=api_key,
+        base_url=base_url,
+        temperature=0,
+        timeout=60,
+        stream=False,
+    )
     return _llm
 
 
 def get_llm():
-    """Get the initialized LLM instance. Must call init_llm() first."""
     if _llm is None:
-        raise RuntimeError("LLM not initialized. Call init_llm(context.env) first.")
+        raise RuntimeError("Call init_llm() first.")
     return _llm
+
+
+def get_collapse_llm():
+    if _collapse_llm is None:
+        raise RuntimeError("Call init_llm() first.")
+    return _collapse_llm

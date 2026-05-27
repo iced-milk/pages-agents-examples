@@ -1,8 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import type { SSEEvent } from '../types';
 
-type SSEStatus = 'idle' | 'connecting' | 'streaming' | 'done' | 'error';
-
 // ── localStorage history management ──
 
 const HISTORY_KEY = 'crewai-planner-history';
@@ -38,45 +36,50 @@ export function removeHistory(id: string) {
 
 export function useSSE() {
   const [events, setEvents] = useState<SSEEvent[]>([]);
-  const [status, setStatus] = useState<SSEStatus>('idle');
   const abortRef = useRef<AbortController | null>(null);
   const conversationIdRef = useRef<string>('');
 
-  const start = useCallback(async (productName: string, locale?: string) => {
-    // Reset
-    setEvents([]);
-    setStatus('connecting');
-
-    // Abort previous if any
+  /**
+   * Send one user message — either the product name (first turn) or any
+   * follow-up. The server determines phase from stored history.
+   */
+  const send = useCallback(async (
+    userMessage: string,
+    locale: string,
+    options?: { isFirstTurn?: boolean },
+  ) => {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
 
-    // Generate new conversationId for each task
-    const conversationId = crypto.randomUUID();
-    conversationIdRef.current = conversationId;
+    // First turn: generate a fresh conversationId, save to localStorage / URL.
+    if (options?.isFirstTurn) {
+      const conversationId = crypto.randomUUID();
+      conversationIdRef.current = conversationId;
+      saveHistory(conversationId, userMessage);
+      window.history.replaceState(null, '', '?id=' + conversationId);
+    }
 
-    // Save to localStorage and update URL
-    saveHistory(conversationId, productName);
-    window.history.replaceState(null, '', '?id=' + conversationId);
+    const cid = conversationIdRef.current;
 
     try {
       const res = await fetch('/stream', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'pages-agent-conversation-id': conversationId,
+          'makers-conversation-id': cid,
         },
-        body: JSON.stringify({ product_name: productName, locale: locale || 'English' }),
+        body: JSON.stringify({
+          action: 'send',
+          user_message: userMessage,
+          locale,
+        }),
         signal: controller.signal,
       });
 
       if (!res.ok || !res.body) {
-        setStatus('error');
         return;
       }
-
-      setStatus('streaming');
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -88,9 +91,8 @@ export function useSSE() {
 
         buffer += decoder.decode(value, { stream: true });
 
-        // Parse SSE lines: "data: {...}\n\n"
         const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // keep incomplete line in buffer
+        buffer = lines.pop() || '';
 
         for (const line of lines) {
           const trimmed = line.trim();
@@ -101,7 +103,6 @@ export function useSSE() {
             setEvents((prev) => [...prev, event]);
 
             if (event.type === 'done') {
-              setStatus(event.status === 'completed' ? 'done' : 'error');
               return;
             }
           } catch {
@@ -109,18 +110,15 @@ export function useSSE() {
           }
         }
       }
-
-      // Stream ended without done event
-      setStatus('done');
     } catch (err) {
-      if ((err as Error).name !== 'AbortError') {
-        setStatus('error');
-      }
+      // AbortError is expected when a new request cancels the previous one
     }
   }, []);
 
-  // Returns raw memory messages: { role, content, metadata }
-  const loadHistory = useCallback(async (targetId: string): Promise<Array<{ role: string; content: string; metadata?: Record<string, unknown> | null }>> => {
+  // Returns raw stored messages: { role, content, metadata }
+  const loadHistory = useCallback(async (
+    targetId: string,
+  ): Promise<Array<{ role: string; content: string; metadata?: Record<string, unknown> | null }>> => {
     conversationIdRef.current = targetId;
     window.history.replaceState(null, '', '?id=' + targetId);
 
@@ -129,7 +127,7 @@ export function useSSE() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'pages-agent-conversation-id': targetId,
+          'makers-conversation-id': targetId,
         },
         body: JSON.stringify({ action: 'history', conversationId: targetId }),
       });
@@ -141,10 +139,16 @@ export function useSSE() {
     }
   }, []);
 
+  const resetConversation = useCallback(() => {
+    conversationIdRef.current = '';
+    setEvents([]);
+    window.history.replaceState(null, '', window.location.pathname);
+  }, []);
+
   return {
     events,
-    status,
-    start,
+    send,
     loadHistory,
+    resetConversation,
   };
 }

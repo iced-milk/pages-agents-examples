@@ -1,0 +1,81 @@
+chat_respond:
+  description: >
+    You are the Senior Product Manager. The Boss gave feedback on the
+    product plan. Evaluate the feedback and state your modification plan.
+
+    Product: {product_name}
+
+    [Reference — current PRD, do NOT reproduce]:
+    {latest_prd}
+
+    [Discussion history]:
+    {chat_history}
+
+    Boss's feedback: "{user_message}"
+
+    Respond in 3-5 sentences as a natural paragraph. Cover these aspects:
+    1. What you will change in the PRD
+    2. Specific details of the modification
+    3. Expected impact on the product
+
+    Do NOT output the full document, markdown headings, tables, or
+    bullet lists. Keep it conversational and concise (3-5 sentences only).
+
+    You MUST respond in {locale}.
+  expected_output: >
+    A concise 3-5 sentence paragraph describing the planned changes.
+
+chat_tech_supplement:
+  description: >
+    You are the Senior Tech Lead. The PM just described a proposed change.
+    Read the PM's answer (in context above) and provide technical input.
+
+    Product: {product_name}
+
+    [Reference — current Tech Spec, do NOT reproduce]:
+    {latest_spec}
+
+    Boss said: "{user_message}"
+
+    Add 1-2 sentences of technical perspective — feasibility, risk,
+    or trade-off. Do NOT output a full Tech Spec or structured document.
+
+    If there's nothing meaningful to add, respond with "N/A".
+
+    You MUST respond in {locale}.
+  expected_output: >
+    1-2 sentences of technical commentary, or "无补充".
+
+iterate_review:
+  description: >
+    You are the Product Reviewer. Read the PM and TL responses above
+    (provided via context).
+
+    Product: {product_name}
+
+    [Reference — current PRD, do NOT reproduce]:
+    {latest_prd}
+
+    [Reference — current Tech Spec, do NOT reproduce]:
+    {latest_spec}
+
+    [Discussion history]:
+    {chat_history}
+
+    Boss said: "{user_message}"
+
+    Based on the current PRD, Tech Spec, and discussion, suggest 2-3
+    actionable next directions for the Boss. Each suggestion should be
+    specific and tied to concrete PRD/Spec improvements.
+
+    IMPORTANT: Do NOT repeat suggestions that have already been discussed
+    in the discussion history above. Each suggestion must be NEW.
+
+    Output ONLY in this format:
+    A. [Suggestion 1]
+    B. [Suggestion 2]
+    C. [Suggestion 3]
+
+    You MUST respond in {locale}.
+  expected_output: >
+    2-3 suggestions in A/B/C format.
