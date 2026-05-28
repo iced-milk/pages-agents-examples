@@ -3,7 +3,7 @@
  *
  * Lead Researcher + Expert Researcher architecture:
  * - Lead Researcher breaks user questions into sub-questions
- * - Delegates each to an Expert Researcher (subagent with internet_search tool)
+ * - Delegates each to an Expert Researcher (subagent with web_search tool)
  * - Synthesizes a concise answer from all sub-results
  *
  * Stream design follows the official Deep Agents streaming guide
@@ -41,8 +41,6 @@ import {
 } from 'langchain';
 import { createDeepAgent, CompositeBackend, StateBackend, StoreBackend, type SubAgent } from 'deepagents';
 import { AIMessageChunk, ToolMessage } from '@langchain/core/messages';
-import { DDGS, type SearchResult } from '@phukon/duckduckgo-search';
-import { z } from 'zod';
 
 type Model = Awaited<ReturnType<typeof initChatModel>>;
 type Agent = ReturnType<typeof createDeepAgent>;
@@ -94,41 +92,13 @@ async function getModel(env: Env): Promise<Model> {
   return model;
 }
 
-function getAgent(modelInstance: Model, checkpointer: any, store: any): Agent {
+function getAgent(modelInstance: Model, checkpointer: any, store: any, contextTools: any): Agent {
   if (!agent) {
     logger.log('Initializing research agent...');
 
     const today = new Date().toISOString().slice(0, 10);
 
-    const ddgs = new DDGS({ timeout: 15000 });
-
-    const internetSearch = tool(
-      async ({ query, maxResults = 3 }: { query: string; maxResults?: number }) => {
-        const results: SearchResult[] = await ddgs.text({
-          keywords: query,
-          maxResults,
-        });
-        if (!results || results.length === 0) {
-          return 'No search results found.';
-        }
-        return results
-          .map((r, i) => `[${i + 1}] ${r.title}\n${r.href}\n${r.body ?? ''}`)
-          .join('\n\n');
-      },
-      {
-        name: 'internet_search',
-        description:
-          'Search the internet using DuckDuckGo. Returns titles, URLs, and snippets for the given query.',
-        schema: z.object({
-          query: z.string().describe('The search query'),
-          maxResults: z
-            .number()
-            .optional()
-            .default(3)
-            .describe('Maximum number of results to return'),
-        }),
-      }
-    );
+    const webSearchTools = contextTools.toLangChainTools(tool, ['web_search']);
 
     const researcherSubagent: SubAgent = {
       name: 'researcher',
@@ -137,20 +107,20 @@ function getAgent(modelInstance: Model, checkpointer: any, store: any): Agent {
       systemPrompt:
         `You are an expert researcher. ` +
         `Today's date is ${today}. ` +
-        `Use \`internet_search\` to find relevant, up-to-date information. ` +
+        `Use \`web_search\` to find relevant, up-to-date information. ` +
         `Return only a concise summary of your findings with source URLs. ` +
         `Do not include raw search results or detailed tool outputs. ` +
         `Do not create or edit files — return your findings directly. ` +
         `IMPORTANT: Always respond in the same language as the task description you received. ` +
         `If the task is in Chinese, respond in Chinese. If in English, respond in English.`,
-      tools: [internetSearch],
+      tools: webSearchTools,
       middleware: [
         modelRetryMiddleware({ maxRetries: 3 }),
         modelCallLimitMiddleware({ runLimit: 30 }),
-        toolRetryMiddleware({ maxRetries: 2, tools: ['internet_search'] }),
+        toolRetryMiddleware({ maxRetries: 2, tools: ['web_search'] }),
         toolCallLimitMiddleware({
-          toolName: 'internet_search',
-          runLimit: 15,
+          toolName: 'web_search',
+          runLimit: 20,
         }),
       ],
     };
@@ -485,7 +455,7 @@ export async function onRequest(context: any) {
   try {
     const envVars = getEnv(env);
     const modelInstance = await getModel(envVars);
-    agentInstance = getAgent(modelInstance, checkpointer, store);
+    agentInstance = getAgent(modelInstance, checkpointer, store, context.tools);
   } catch (e) {
     const msg = (e as Error).message;
     logger.error(msg);
