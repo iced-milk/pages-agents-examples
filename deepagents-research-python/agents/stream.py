@@ -3,7 +3,7 @@ Deep Research Agent — EdgeOne Pages handler (Python).
 
 Lead Researcher + Expert Researcher architecture:
 - Lead Researcher breaks user questions into sub-questions
-- Delegates each to an Expert Researcher (subagent with internet_search tool)
+- Delegates each to an Expert Researcher (subagent with web_search tool)
 - Synthesizes a concise answer from all sub-results
 
 Stream design follows the official Deep Agents streaming guide
@@ -48,7 +48,7 @@ from langchain.agents.middleware import (
     ToolRetryMiddleware,
 )
 from langchain_core.messages import AIMessageChunk, ToolMessage
-from langchain_community.tools import DuckDuckGoSearchResults
+from langchain_core.tools import StructuredTool
 from deepagents import create_deep_agent
 from deepagents.backends import CompositeBackend, StateBackend, StoreBackend
 
@@ -90,7 +90,7 @@ def _get_model(env: dict[str, str]):
     return _model
 
 
-def _get_agent(model, checkpointer, store):
+def _get_agent(model, checkpointer, store, context_tools):
     global _agent
     if _agent is None:
         logger.log("Initializing research agent...")
@@ -98,11 +98,7 @@ def _get_agent(model, checkpointer, store):
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
         # -- Tools --
-        internet_search = DuckDuckGoSearchResults(
-            name="internet_search",
-            max_results=3,
-            output_format="list",
-        )
+        web_search_tools = context_tools.to_langchain_tools(StructuredTool, names=["web_search"])
 
         # -- SubAgent definition --
         researcher_subagent = {
@@ -111,19 +107,19 @@ def _get_agent(model, checkpointer, store):
             "system_prompt": (
                 "You are an expert researcher. "
                 f"Today's date is {today}. "
-                "Use `internet_search` to find relevant, up-to-date information. "
+                "Use `web_search` to find relevant, up-to-date information. "
                 "Return only a concise summary of your findings with source URLs. "
                 "Do not include raw search results or detailed tool outputs. "
                 "Do not create or edit files — return your findings directly. "
                 "IMPORTANT: Always respond in the same language as the task description you received. "
                 "If the task is in Chinese, respond in Chinese. If in English, respond in English."
             ),
-            "tools": [internet_search],
+            "tools": web_search_tools,
             "middleware": [
                 ModelRetryMiddleware(max_retries=3),
                 ModelCallLimitMiddleware(run_limit=30),
-                ToolRetryMiddleware(max_retries=2, tools=["internet_search"]),
-                ToolCallLimitMiddleware(tool_name="internet_search", run_limit=15),
+                ToolRetryMiddleware(max_retries=2, tools=["web_search"]),
+                ToolCallLimitMiddleware(tool_name="web_search", run_limit=20),
             ],
         }
 
@@ -430,7 +426,7 @@ async def handler(context):
     try:
         env = _get_env(context.env)
         model = _get_model(env)
-        agent_instance = _get_agent(model, checkpointer, store)
+        agent_instance = _get_agent(model, checkpointer, store, context.tools)
     except Exception as e:
         msg = str(e)
         logger.error(msg)
