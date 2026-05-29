@@ -19,7 +19,7 @@ from crewai.utilities.streaming import (
 from ._lib.flow import TurnFlow, bind_collapse_llm
 from ._lib.llm import init_llm
 from ._lib.logger import create_logger
-from ._lib.persistence import get_persistence, has_pending
+from ._lib.persistence import get_persistence, has_pending, load_pending_from_store, sync_pending_to_store
 
 logger = create_logger("stream")
 
@@ -97,6 +97,8 @@ async def handler(context):
     persistence = get_persistence()
 
     is_resume = has_pending(cid)
+    if not is_resume:
+        is_resume = await load_pending_from_store(cid, store)
     logger.log(f"turn={'resume' if is_resume else 'kickoff'} cid={cid}")
 
     async def gen():
@@ -203,11 +205,13 @@ async def handler(context):
             if pending_writes:
                 await asyncio.gather(*pending_writes, return_exceptions=True)
 
+            await sync_pending_to_store(cid, store)
             yield context.utils.sse({"type": "done", "status": "completed"})
 
         except Exception as e:
             logger.error("stream error:", str(e))
             yield context.utils.sse({"type": "error", "message": str(e)})
+            await sync_pending_to_store(cid, store)
             yield context.utils.sse({"type": "done", "status": "error"})
             if pending_writes:
                 await asyncio.gather(*pending_writes, return_exceptions=True)
@@ -218,14 +222,28 @@ async def handler(context):
 def _parse_options(text: str) -> dict | None:
     """Parse A/B/C/D options from agent output. Returns structured data or None."""
     import re
-    lines = text.strip().split("\n")
     choices = []
 
-    for line in lines:
+    # Try line-based first (each option on its own line)
+    for line in text.strip().split("\n"):
         match = re.match(r'^([A-D])\.\s*(.+)', line.strip())
         if match:
             choices.append({"key": match.group(1), "text": match.group(2).strip()})
 
-    if len(choices) >= 2:
+    if choices:
+        return {"choices": choices}
+
+    # Fallback: single-line format "A. xxx B. yyy C. zzz"
+    parts = re.split(r'\s*\b([A-D])\.\s+', text.strip())
+    # After split: ['preamble', 'A', 'text_a', 'B', 'text_b', ...]
+    i = 1
+    while i + 1 < len(parts):
+        key = parts[i]
+        value = parts[i + 1].strip()
+        if value:
+            choices.append({"key": key, "text": value})
+        i += 2
+
+    if choices:
         return {"choices": choices}
     return None

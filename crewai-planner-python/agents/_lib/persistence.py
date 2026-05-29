@@ -1,10 +1,13 @@
 """In-process FlowPersistence for TurnFlow pause/resume.
 
 Sticky routing ensures same cid → same instance → dict is reliable.
+When the instance restarts, state is recovered from the external store
+via load_pending_from_store() / sync_pending_to_store().
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from pydantic import BaseModel
@@ -60,3 +63,51 @@ def get_persistence() -> PagesPersistence:
 
 def has_pending(cid: str) -> bool:
     return cid in _pending_store
+
+
+# ─── External store sync (survives instance restarts) ───
+
+FLOW_STATE_SUFFIX = ":flow_state"
+
+
+async def load_pending_from_store(cid: str, store) -> bool:
+    """Load pending state from external store into memory. Returns True if loaded."""
+    if cid in _pending_store:
+        return True
+    state_cid = cid + FLOW_STATE_SUFFIX
+    try:
+        messages = await store.get_messages(state_cid, limit=1, order="desc")
+    except Exception:
+        return False
+    if not messages:
+        return False
+    try:
+        data = json.loads(messages[0].content)
+        state_data = data["state"]
+        context = PendingFeedbackContext.from_dict(data["context"])
+        _pending_store[cid] = (state_data, context)
+        _state_store[cid] = state_data
+        return True
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return False
+
+
+async def sync_pending_to_store(cid: str, store) -> None:
+    """Sync in-memory pending state to external store.
+
+    If pending exists: save it (append a message to virtual conversation).
+    If not: clean up the virtual conversation (flow completed or errored).
+    """
+    state_cid = cid + FLOW_STATE_SUFFIX
+    if cid in _pending_store:
+        state_data, context = _pending_store[cid]
+        data = {
+            "state": _to_dict(state_data) if not isinstance(state_data, dict) else state_data,
+            "context": context.to_dict(),
+        }
+        await store.append_message(state_cid, "system", json.dumps(data, ensure_ascii=False))
+    else:
+        try:
+            await store.delete_conversation(state_cid)
+        except Exception:
+            pass

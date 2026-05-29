@@ -58,11 +58,15 @@ review_suggest:
     feature scope to 3 core features", "add competitor analysis",
     "clarify technical stack choices".
 
-    Output ONLY the suggestions in this exact format (no other text):
+    Output ONLY the suggestions in this exact format, each on its own
+    line (no other text, no numbering, no extra explanation):
+
     A. [Suggestion 1]
+
     B. [Suggestion 2]
+
     C. [Suggestion 3]
 
     You MUST respond in {locale}.
   expected_output: >
-    2-3 suggestions in A/B/C format, nothing else.
+    2-3 suggestions in A/B/C format, each on a separate line, nothing else.
