@@ -45,7 +45,7 @@ export type FlowStatus = 'idle' | 'running' | 'completed' | 'error';
 
 // --- Chat items rendered in the message stream ---
 export type ChatItem =
-  | { type: 'system'; text: string }
+  | { type: 'error'; text: string }
   | { type: 'user'; content: string }
   | { type: 'divider'; agent: string }
   | {

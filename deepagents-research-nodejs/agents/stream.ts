@@ -419,6 +419,32 @@ async function* eventStream(
         });
       }
     }
+
+    // ── Check for unstreamed errors in final state ──
+    // The framework may catch LLM errors internally (e.g. after retries)
+    // and store them in state without throwing to our stream iterator.
+    try {
+      const finalState = await agentInstance.graph.getState({
+        configurable: { thread_id: conversationId },
+      });
+      const msgs = finalState?.values?.messages || [];
+      if (msgs.length > 0) {
+        const lastMsg = msgs[msgs.length - 1];
+        const msgType = typeof lastMsg._getType === 'function' ? lastMsg._getType() : lastMsg.type;
+        if (msgType === 'ai') {
+          const text = typeof lastMsg.content === 'string' ? lastMsg.content : '';
+          if (text && text.includes('MiddlewareError')) {
+            yield send({
+              type: 'error',
+              source: 'main',
+              content: text,
+            });
+          }
+        }
+      }
+    } catch {
+      // State check failed — not critical, skip silently
+    }
   } catch (e: unknown) {
     const error = e as Error;
     if (error.name === 'AbortError' || signal?.aborted) {

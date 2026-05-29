@@ -5,7 +5,7 @@ import { InputPanel } from './components/InputPanel';
 import { FlowTimeline } from './components/FlowTimeline';
 import { ChatMessage, OptionsCard, UserMessage } from './components/ChatMessage';
 import { RoleDivider } from './components/RoleDivider';
-import { SystemMessage } from './components/SystemMessage';
+import { ErrorMessage } from './components/ErrorMessage';
 import type { ChatItem, FlowStatus, Phase, PhaseNode } from './types';
 import { t, getLocaleName, toggleLang, onLangChange } from './i18n';
 
@@ -167,7 +167,7 @@ function reducer(state: AppState, action: Action): AppState {
         flowStatus: 'error',
         messages: [
           ...state.messages,
-          { type: 'system' as const, text: `❌ ${action.message}` },
+          { type: 'error' as const, text: action.message },
         ],
       };
 
@@ -560,7 +560,7 @@ export default function App() {
                 {state.messages.map((item, i) => {
                   if (item.type === 'user') return <UserMessage key={i} content={item.content} />;
                   if (item.type === 'divider') return <RoleDivider key={i} agent={item.agent} />;
-                  if (item.type === 'system') return <SystemMessage key={i} text={item.text} />;
+                  if (item.type === 'error') return <ErrorMessage key={i} text={item.text} />;
                   if (item.type === 'options') {
                     return (
                       <OptionsCard

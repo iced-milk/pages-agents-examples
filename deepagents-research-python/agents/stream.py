@@ -398,6 +398,28 @@ async def _event_stream(agent, message: str, conversation_id: str, utils):
                     "tool_call_id": tc_id,
                 })
 
+        # ── Check for unstreamed errors in final state ──
+        # The framework may catch LLM errors internally (e.g. after retries)
+        # and store them in state without throwing to our stream iterator.
+        try:
+            state = await agent.aget_state(
+                {"configurable": {"thread_id": conversation_id}}
+            )
+            msgs = (state.values or {}).get("messages", []) if state else []
+            if msgs:
+                last_msg = msgs[-1]
+                msg_type = getattr(last_msg, "type", None)
+                if msg_type == "ai":
+                    text = getattr(last_msg, "content", "")
+                    if isinstance(text, str) and "Model call failed" in text:
+                        yield send({
+                            "type": "error",
+                            "source": "main",
+                            "content": text,
+                        })
+        except Exception:
+            pass  # State check failed — not critical
+
     except Exception as e:
         logger.error("stream error:", str(e))
         yield send({
